@@ -1446,6 +1446,8 @@
         selectedId: null,
         undoStack: [],
         moveDrag: null,
+        wireFromTermId: null, // tsk-103: active wire source terminal id
+        hoverTermId: null, // tsk-103: terminal under cursor in wire mode
       };
 
       const css = (v) =>
@@ -1563,16 +1565,26 @@
       function drawTermDots(ctx, comp, zoom) {
         const col = COMP_COLORS[comp.type];
         comp.terminals.forEach((t) => {
-          const rad = (comp.rotation * Math.PI) / 180;
-          const rx =
-            t.ox * GRID * zoom * Math.cos(rad) -
-            t.oy * GRID * zoom * Math.sin(rad);
-          const ry =
-            t.ox * GRID * zoom * Math.sin(rad) +
-            t.oy * GRID * zoom * Math.cos(rad);
+          // ctx is already translated+rotated to component centre by the caller.
+          // Draw at the raw grid-unit offset × pixel scale — NO extra rotation needed.
+          const rx = t.ox * GRID * zoom;
+          const ry = t.oy * GRID * zoom;
+
+          // glow ring for hovered or active-from terminal
+          const isFrom = state.wireFromTermId === t.id;
+          const isHover = state.hoverTermId === t.id;
+          if (isFrom || isHover) {
+            ctx.beginPath();
+            ctx.arc(rx, ry, (isFrom ? 9 : 7) * zoom, 0, Math.PI * 2);
+            ctx.fillStyle = isFrom
+              ? "rgba(79,142,247,0.35)"
+              : "rgba(79,142,247,0.20)";
+            ctx.fill();
+          }
+
           ctx.beginPath();
-          ctx.arc(rx, ry, 3.5 * zoom, 0, Math.PI * 2);
-          ctx.fillStyle = col;
+          ctx.arc(rx, ry, (isFrom ? 5 : 3.5) * zoom, 0, Math.PI * 2);
+          ctx.fillStyle = isFrom ? css("--color-accent") : col;
           ctx.fill();
           ctx.strokeStyle = css("--color-bg-canvas");
           ctx.lineWidth = 1;
@@ -1823,11 +1835,359 @@
         ctx.clearRect(0, 0, W, H);
         drawGrid();
         drawSnapIndicator();
+        // tsk-103: draw placed wires
+        state.wires.forEach((w) => drawWire(ctx, w));
+        // tsk-103: junction dots at T-intersections
+        drawJunctions(ctx);
+        // tsk-103: draw live wire preview
+        if (state.wireFromTermId && state.mouseGrid) {
+          drawWirePreview(
+            ctx,
+            state.wireFromTermId,
+            state.mouseGrid.x,
+            state.mouseGrid.y,
+          );
+        }
         state.components.forEach((c) => {
           const f = DRAW_FN[c.type];
           if (f) f(ctx, c, state.zoom);
         });
       }
+
+      // ── Module 8: Wire Drawing (tsk-103) ─────────────────────
+
+      /** Generate a unique wire id */
+      let _wireCnt = 0;
+      function nextWireId() {
+        return "w" + ++_wireCnt;
+      }
+
+      /**
+       * Return canvas-pixel position of a terminal.
+       * Uses termPos() (grid coords) then toCanvas().
+       */
+      function termCanvasPos(comp, term) {
+        const gp = termPos(comp, term);
+        return toCanvas(gp.x, gp.y);
+      }
+
+      /**
+       * Find the terminal closest to canvas point (cx, cy).
+       * Returns { comp, term } or null if none within SNAP_R pixels.
+       */
+      const TERM_SNAP_R = 14; // px snap radius (canvas pixels)
+      function hitTestTerminal(cx, cy) {
+        let best = null,
+          bestD = TERM_SNAP_R;
+        state.components.forEach((comp) => {
+          comp.terminals.forEach((term) => {
+            const cp = termCanvasPos(comp, term);
+            const d = Math.hypot(cp.x - cx, cp.y - cy);
+            if (d < bestD) {
+              bestD = d;
+              best = { comp, term };
+            }
+          });
+        });
+        return best;
+      }
+
+      /**
+       * Compute L-shaped orthogonal waypoints between two grid positions.
+       * Returns flat array [x1,y1, x2,y2, ...] in GRID UNITS (not pixels).
+       * Stored on wire objects so they stay correct across pan/zoom/move.
+       */
+      function computeWaypoints(ax, ay, bx, by) {
+        const midX = (ax + bx) / 2;
+        return [ax, ay, midX, ay, midX, by, bx, by];
+      }
+
+      /**
+       * When a component moves or rotates, update only the terminal endpoints
+       * of attached wires. Intermediate user-placed waypoints are preserved.
+       */
+      function refreshWiresForComp(comp) {
+        state.wires.forEach((w) => {
+          const fromComp = state.components.find((c) =>
+            c.terminals.some((t) => t.id === w.fromTermId),
+          );
+          const toComp = state.components.find((c) =>
+            c.terminals.some((t) => t.id === w.toTermId),
+          );
+          if (!fromComp || !toComp) return;
+          if (fromComp.id !== comp.id && toComp.id !== comp.id) return;
+
+          const fromTerm = fromComp.terminals.find(
+            (t) => t.id === w.fromTermId,
+          );
+          const toTerm = toComp.terminals.find((t) => t.id === w.toTermId);
+          const fgp = termPos(fromComp, fromTerm);
+          const tgp = termPos(toComp, toTerm);
+
+          // Update only first and last waypoint pairs; keep middle points intact
+          w.waypoints[0] = fgp.x;
+          w.waypoints[1] = fgp.y;
+          w.waypoints[w.waypoints.length - 2] = tgp.x;
+          w.waypoints[w.waypoints.length - 1] = tgp.y;
+        });
+      }
+
+      /** Draw a placed wire — converts grid-unit waypoints to canvas pixels at draw time. */
+      function drawWire(ctx, wire) {
+        const gpts = wire.waypoints;
+        if (!gpts || gpts.length < 4) return;
+        const pts = [];
+        for (let i = 0; i < gpts.length; i += 2) {
+          const cp = toCanvas(gpts[i], gpts[i + 1]);
+          pts.push(cp.x, cp.y);
+        }
+        ctx.save();
+        ctx.beginPath();
+        ctx.strokeStyle = wire.color;
+        ctx.lineWidth = 2.5 * state.zoom;
+        ctx.lineJoin = "round";
+        ctx.lineCap = "round";
+        ctx.moveTo(pts[0], pts[1]);
+        for (let i = 2; i < pts.length; i += 2) ctx.lineTo(pts[i], pts[i + 1]);
+        ctx.stroke();
+
+        // Junction dot at each intermediate user-placed waypoint
+        for (let i = 2; i < pts.length - 2; i += 2) {
+          ctx.beginPath();
+          ctx.arc(pts[i], pts[i + 1], 3.5 * state.zoom, 0, Math.PI * 2);
+          ctx.fillStyle = wire.color;
+          ctx.fill();
+        }
+        ctx.restore();
+      }
+
+      /**
+       * Draw the live "rubber-band" preview while a wire is being drawn.
+       * fromTermId → current mouse grid position (gx, gy).
+       */
+      function drawWirePreview(ctx, fromTermId, gx, gy) {
+        if (!activeWire) return;
+        const pts = [];
+        // Convert all accumulated user points to canvas pixels
+        activeWire.points.forEach((p) => {
+          const cp = toCanvas(p.x, p.y);
+          pts.push(cp.x, cp.y);
+        });
+        // Add live cursor position
+        const cp = toCanvas(gx, gy);
+        pts.push(cp.x, cp.y);
+
+        if (pts.length < 4) return;
+        ctx.save();
+        ctx.beginPath();
+        ctx.setLineDash([6, 4]);
+        ctx.strokeStyle = state.wireColor;
+        ctx.lineWidth = 2 * state.zoom;
+        ctx.lineJoin = "round";
+        ctx.lineCap = "round";
+        ctx.globalAlpha = 0.75;
+        ctx.moveTo(pts[0], pts[1]);
+        for (let i = 2; i < pts.length; i += 2) ctx.lineTo(pts[i], pts[i + 1]);
+        ctx.stroke();
+
+        // Dot at each placed waypoint (not the first terminal dot, not cursor)
+        activeWire.points.slice(1).forEach((p) => {
+          const wp = toCanvas(p.x, p.y);
+          ctx.beginPath();
+          ctx.arc(wp.x, wp.y, 4 * state.zoom, 0, Math.PI * 2);
+          ctx.fillStyle = state.wireColor;
+          ctx.fill();
+        });
+        ctx.restore();
+      }
+
+      // ── Junction detection & rendering ───────────────────────
+
+      /**
+       * Check if grid point (px, py) lies exactly on a wire segment
+       * (not at its endpoints — those are terminals, not junctions).
+       * Segments are axis-aligned so we use integer comparisons.
+       */
+      function pointOnSegment(px, py, x1, y1, x2, y2) {
+        const EPS = 0.01;
+        if (Math.abs(y1 - y2) < EPS) {
+          // horizontal segment
+          if (Math.abs(py - y1) > EPS) return false;
+          return px > Math.min(x1, x2) + EPS && px < Math.max(x1, x2) - EPS;
+        }
+        if (Math.abs(x1 - x2) < EPS) {
+          // vertical segment
+          if (Math.abs(px - x1) > EPS) return false;
+          return py > Math.min(y1, y2) + EPS && py < Math.max(y1, y2) - EPS;
+        }
+        return false;
+      }
+
+      /**
+       * Collect all T-intersection junction points.
+       * A junction dot is drawn wherever ANY wire's waypoint (including terminal
+       * endpoints) lies on the interior of another wire's segment.
+       * Returns array of {x, y} in grid units (de-duplicated).
+       */
+      function collectJunctions() {
+        const junctions = new Map();
+
+        function segments(wire) {
+          const p = wire.waypoints;
+          const segs = [];
+          for (let i = 0; i < p.length - 2; i += 2)
+            segs.push({ x1: p[i], y1: p[i + 1], x2: p[i + 2], y2: p[i + 3] });
+          return segs;
+        }
+
+        // Every waypoint on every wire (all grid-unit points)
+        const allPoints = [];
+        state.wires.forEach((w) => {
+          for (let i = 0; i < w.waypoints.length; i += 2)
+            allPoints.push({ x: w.waypoints[i], y: w.waypoints[i + 1] });
+        });
+
+        // Check each point against all segments from all wires
+        allPoints.forEach((pt) => {
+          state.wires.forEach((w) => {
+            segments(w).forEach((seg) => {
+              if (pointOnSegment(pt.x, pt.y, seg.x1, seg.y1, seg.x2, seg.y2)) {
+                const key = pt.x.toFixed(3) + "," + pt.y.toFixed(3);
+                junctions.set(key, { x: pt.x, y: pt.y });
+              }
+            });
+          });
+        });
+
+        return Array.from(junctions.values());
+      }
+
+      /** Draw filled junction dots at all T-intersection points. */
+      function drawJunctions(ctx) {
+        const jpts = collectJunctions();
+        if (jpts.length === 0) return;
+        ctx.save();
+        jpts.forEach(({ x, y }) => {
+          const cp = toCanvas(x, y);
+          ctx.beginPath();
+          ctx.arc(cp.x, cp.y, 5 * state.zoom, 0, Math.PI * 2);
+          ctx.fillStyle = "#60A5FA";
+          ctx.shadowColor = "rgba(79,142,247,0.6)";
+          ctx.shadowBlur = 6 * state.zoom;
+          ctx.fill();
+          ctx.shadowBlur = 0;
+        });
+        ctx.restore();
+      }
+
+      // ── Wire mode: canvas click handling ─────────────────────
+
+      // ── Wire mode: canvas click handling ─────────────────────
+      // activeWire tracks the wire currently being drawn (multi-segment)
+      // { fromTermId, points: [{x,y},...] }  — points in grid units
+      let activeWire = null;
+
+      canvas.addEventListener("mousedown", (e) => {
+        if (e.button !== 0 || state.mode !== "wire") return;
+        const rect = canvas.getBoundingClientRect();
+        const cx = e.clientX - rect.left;
+        const cy = e.clientY - rect.top;
+        const termHit = hitTestTerminal(cx, cy);
+        const gp = toGrid(cx, cy); // snapped grid point under cursor
+
+        if (!activeWire) {
+          // ── Phase 1: start wire from a terminal ──────────────
+          if (!termHit) return; // must start on a terminal
+          const startGp = termPos(termHit.comp, termHit.term);
+          activeWire = {
+            fromTermId: termHit.term.id,
+            fromComp: termHit.comp,
+            fromTerm: termHit.term,
+            points: [{ x: startGp.x, y: startGp.y }],
+          };
+          state.wireFromTermId = termHit.term.id;
+          render();
+        } else {
+          // ── Phase 2+: extend or finish wire ──────────────────
+          if (termHit) {
+            // Clicked a terminal → finish the wire
+            const from = activeWire;
+            const toComp = termHit.comp;
+            const toTerm = termHit.term;
+
+            // Guards
+            if (toTerm.id === from.fromTermId) return;
+            if (toComp.id === from.fromComp.id) {
+              showToast(
+                "Can't connect a component to itself.",
+                "warning",
+                2000,
+              );
+              return;
+            }
+            const alreadyWired = state.wires.some(
+              (w) =>
+                (w.fromTermId === from.fromTermId &&
+                  w.toTermId === toTerm.id) ||
+                (w.fromTermId === toTerm.id && w.toTermId === from.fromTermId),
+            );
+            if (alreadyWired) {
+              showToast(
+                "Those terminals are already connected.",
+                "warning",
+                2000,
+              );
+              return;
+            }
+
+            // Build final waypoints: existing user points + destination terminal pos
+            const endGp = termPos(toComp, toTerm);
+            const allPoints = [...from.points, { x: endGp.x, y: endGp.y }];
+            const waypoints = allPoints.flatMap((p) => [p.x, p.y]);
+
+            pushUndo();
+            state.wires.push({
+              id: nextWireId(),
+              fromTermId: from.fromTermId,
+              toTermId: toTerm.id,
+              color: state.wireColor,
+              waypoints, // grid units, user-controlled path
+              node: null,
+            });
+            // Reset
+            activeWire = null;
+            state.wireFromTermId = null;
+            state.hoverTermId = null;
+            render();
+            showToast("Wire connected.", "success", 1200);
+          } else {
+            // Clicked empty canvas → place an intermediate waypoint (junction/bend)
+            const last = activeWire.points[activeWire.points.length - 1];
+            // Only add if it's a new position
+            if (
+              Math.abs(gp.x - last.x) > 0.1 ||
+              Math.abs(gp.y - last.y) > 0.1
+            ) {
+              activeWire.points.push({ x: gp.x, y: gp.y });
+              render();
+            }
+          }
+        }
+      });
+
+      // Wire mode: hover → update hoverTermId + preview
+      canvas.addEventListener("mousemove", (e) => {
+        if (state.mode !== "wire") return;
+        const rect = canvas.getBoundingClientRect();
+        const cx = e.clientX - rect.left;
+        const cy = e.clientY - rect.top;
+        const hit = hitTestTerminal(cx, cy);
+        const newHover = hit ? hit.term.id : null;
+        if (newHover !== state.hoverTermId) {
+          state.hoverTermId = newHover;
+          render();
+        }
+      });
 
       // ── Module 4: Panel drag → canvas drop ───────────────────
       const panelDrag = { active: false, type: null, snapX: 0, snapY: 0 };
@@ -2047,6 +2407,7 @@
         if (!comp) return;
         comp.x = state.moveDrag.startX + Math.round(dx / (GRID * state.zoom));
         comp.y = state.moveDrag.startY + Math.round(dy / (GRID * state.zoom));
+        refreshWiresForComp(comp); // tsk-103 fix: recompute attached wire waypoints
         render();
       });
       window.addEventListener("mouseup", (e) => {
@@ -2143,6 +2504,7 @@
         if (!comp) return;
         pushUndo();
         comp.rotation = (comp.rotation + 90) % 360;
+        refreshWiresForComp(comp); // recompute attached wire waypoints after rotation
         render();
         updateProps();
       }
@@ -2262,6 +2624,12 @@
 
       // ── Module 11: Toolbar, shortcuts, toast, tooltip ─────────
       function setMode(m) {
+        // cancel any in-progress wire when leaving wire mode
+        if (state.mode === "wire" && m !== "wire") {
+          activeWire = null;
+          state.wireFromTermId = null;
+          state.hoverTermId = null;
+        }
         state.mode = m;
         wrap.setAttribute("data-mode", m === "pan" ? "pan" : m);
         document.querySelectorAll(".tool-btn").forEach((b) => {
@@ -2305,6 +2673,8 @@
           gp = toGrid(e.clientX - r.left, e.clientY - r.top);
         state.mouseGrid = gp;
         coordsEl.textContent = "x: " + gp.x + "  y: " + gp.y;
+        // tsk-103: redraw preview line while wire is being drawn
+        if (state.wireFromTermId) render();
       });
 
       document.addEventListener("keydown", (e) => {
@@ -2336,6 +2706,12 @@
               .getElementById("shortcuts-overlay")
               .classList.remove("open");
             document.getElementById("clear-modal").classList.remove("open");
+            if (activeWire || state.wireFromTermId) {
+              activeWire = null;
+              state.wireFromTermId = null;
+              state.hoverTermId = null;
+              render();
+            }
             if (state.mode !== "select") setMode("select");
             if (state.selectedId) deselectAll();
             break;
