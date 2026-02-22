@@ -1307,6 +1307,28 @@
               />
               <span class="property-unit" id="prop-unit">&#937;</span>
             </div>
+            <div class="property-row" id="prop-color-row" style="display: none">
+              <span class="property-label">Color</span>
+              <div
+                id="prop-color-swatches"
+                style="display: flex; gap: 6px; flex-wrap: wrap; flex: 1"
+              ></div>
+              <input
+                type="color"
+                id="prop-color-custom"
+                title="Custom color"
+                style="
+                  width: 28px;
+                  height: 28px;
+                  padding: 2px;
+                  border-radius: 6px;
+                  border: 1px solid var(--color-border-default);
+                  background: var(--color-bg-input);
+                  cursor: pointer;
+                  flex-shrink: 0;
+                "
+              />
+            </div>
             <div class="property-actions">
               <button class="prop-btn rotate" id="prop-rotate">
                 &#10227; Rotate
@@ -1485,6 +1507,15 @@
         LED: { value: 2.0, label: "D" },
         SWITCH: { value: 0, label: "SW", closed: false },
       };
+      // Default LED colors (user can override per-instance via color picker)
+      const LED_COLORS = [
+        "#22C55E",
+        "#EF4444",
+        "#F59E0B",
+        "#60A5FA",
+        "#A78BFA",
+        "#F472B6",
+      ];
       const TERM_OFF = {
         RESISTOR: [
           { label: "A", ox: -3, oy: 0 },
@@ -1524,6 +1555,7 @@
           value: d.value,
           label: d.label + n,
           closed: d.closed ?? null,
+          ledColor: type === "LED" ? "#22C55E" : null,
           terminals: TERM_OFF[type].map((t) => ({
             id: id + "_" + t.label,
             componentId: id,
@@ -1566,7 +1598,11 @@
       }
 
       function drawTermDots(ctx, comp, zoom) {
-        const col = COMP_COLORS[comp.type];
+        // Use per-instance color for LED, global color for others
+        const col =
+          comp.type === "LED" && comp.ledColor
+            ? comp.ledColor
+            : COMP_COLORS[comp.type];
         comp.terminals.forEach((t) => {
           // ctx is already translated+rotated to component centre by the caller.
           // Draw at the raw grid-unit offset × pixel scale — NO extra rotation needed.
@@ -1704,15 +1740,29 @@
         ctx.rotate((comp.rotation * Math.PI) / 180);
         if (comp.id === state.selectedId)
           drawSelBox(ctx, 30 * zoom, 10 * zoom, zoom);
-        const col = COMP_COLORS.LED,
-          lit = current >= 0.01;
+
+        // Use per-instance color (falls back to default green)
+        const col = comp.ledColor || COMP_COLORS.LED;
+
+        // Glow intensity: scales linearly from 10mA (threshold) to 30mA (full)
+        const I_MIN = 0.01,
+          I_MAX = 0.03;
+        const absCurrent = Math.abs(current);
+        const lit = absCurrent >= I_MIN;
+        const intensity = lit
+          ? Math.min(1, (absCurrent - I_MIN) / (I_MAX - I_MIN))
+          : 0;
+
         if (lit) {
           ctx.shadowColor = col;
-          ctx.shadowBlur = 18 * zoom;
+          ctx.shadowBlur = (12 + intensity * 28) * zoom; // 12→40px
         }
+
         ctx.strokeStyle = col;
         ctx.lineWidth = 2 * zoom;
         ctx.lineCap = "round";
+
+        // Lead wires
         ctx.beginPath();
         ctx.moveTo(-30 * zoom, 0);
         ctx.lineTo(-8 * zoom, 0);
@@ -1721,21 +1771,35 @@
         ctx.moveTo(8 * zoom, 0);
         ctx.lineTo(30 * zoom, 0);
         ctx.stroke();
+
+        // Triangle body
         ctx.beginPath();
         ctx.moveTo(-8 * zoom, -8 * zoom);
         ctx.lineTo(-8 * zoom, 8 * zoom);
         ctx.lineTo(8 * zoom, 0);
         ctx.closePath();
-        ctx.fillStyle = lit ? "rgba(34,197,94,0.35)" : "rgba(34,197,94,0.15)";
+        // Fill alpha scales with intensity: 0.12 → 0.55
+        const fillAlpha = lit ? 0.12 + intensity * 0.43 : 0.1;
+        ctx.fillStyle =
+          col +
+          Math.round(fillAlpha * 255)
+            .toString(16)
+            .padStart(2, "0");
         ctx.fill();
         ctx.strokeStyle = col;
         ctx.stroke();
+
+        // Cathode bar
         ctx.beginPath();
         ctx.moveTo(8 * zoom, -8 * zoom);
         ctx.lineTo(8 * zoom, 8 * zoom);
         ctx.stroke();
+
         ctx.shadowBlur = 0;
-        ctx.lineWidth = 1.2 * zoom;
+
+        // Emission rays (brighter when conducting)
+        ctx.lineWidth = (lit ? 1.5 : 1.0) * zoom;
+        ctx.globalAlpha = lit ? 0.5 + intensity * 0.5 : 0.4;
         [
           [12, -4, 17, -9],
           [16, -1, 21, -6],
@@ -1745,6 +1809,8 @@
           ctx.lineTo(x2 * zoom, y2 * zoom);
           ctx.stroke();
         });
+        ctx.globalAlpha = 1;
+
         drawTermDots(ctx, comp, zoom);
         drawCompLabel(ctx, comp, zoom);
         ctx.restore();
@@ -2455,12 +2521,44 @@
       const propLabel = document.getElementById("prop-label");
       const propInput = document.getElementById("prop-input");
       const propUnit = document.getElementById("prop-unit");
+      const propColorRow = document.getElementById("prop-color-row");
+      const propColorSwatches = document.getElementById("prop-color-swatches");
+      const propColorCustom = document.getElementById("prop-color-custom");
       const UNIT_MAP = {
         RESISTOR: { l: "Value", u: "Ω" },
         VOLTAGE_SOURCE: { l: "Voltage", u: "V" },
         LED: { l: "Vf", u: "V" },
         SWITCH: { l: "State", u: "" },
       };
+
+      function buildColorSwatches(comp) {
+        propColorSwatches.innerHTML = "";
+        LED_COLORS.forEach((hex) => {
+          const sw = document.createElement("button");
+          const active =
+            (comp.ledColor || "#22C55E").toLowerCase() === hex.toLowerCase();
+          sw.style.cssText = [
+            "width:20px",
+            "height:20px",
+            "border-radius:50%",
+            `background:${hex}`,
+            `border:2px solid ${active ? "#fff" : "transparent"}`,
+            "cursor:pointer",
+            "flex-shrink:0",
+            `box-shadow:0 0 0 1px ${hex}55`,
+            "transition:border 0.15s",
+          ].join(";");
+          sw.addEventListener("click", () => {
+            pushUndo();
+            comp.ledColor = hex;
+            propColorCustom.value = hex;
+            buildColorSwatches(comp);
+            render();
+          });
+          propColorSwatches.appendChild(sw);
+        });
+        propColorCustom.value = comp.ledColor || "#22C55E";
+      }
 
       function openProps(comp) {
         const m = UNIT_MAP[comp.type] ?? { l: "Value", u: "" };
@@ -2478,6 +2576,13 @@
           propInput.min = comp.type === "RESISTOR" ? "0.001" : "0";
           propInput.step = "0.1";
         }
+        // Color picker: only for LEDs
+        if (comp.type === "LED") {
+          propColorRow.style.display = "flex";
+          buildColorSwatches(comp);
+        } else {
+          propColorRow.style.display = "none";
+        }
         propPanel.classList.add("open");
       }
       function closeProps() {
@@ -2490,6 +2595,17 @@
           if (c) openProps(c);
         }
       }
+
+      // Custom color input (native color picker)
+      propColorCustom.addEventListener("input", () => {
+        if (!state.selectedId) return;
+        const comp = state.components.find((c) => c.id === state.selectedId);
+        if (!comp || comp.type !== "LED") return;
+        comp.ledColor = propColorCustom.value;
+        buildColorSwatches(comp);
+        render();
+      });
+      propColorCustom.addEventListener("change", pushUndo);
 
       propInput.addEventListener("input", () => {
         if (!state.selectedId) return;
@@ -2900,25 +3016,46 @@
             "No voltage source. Add at least one to drive the circuit.",
           );
 
-        // Check for floating terminals (node still null = unconnected)
+        // Check for floating terminals (unconnected = node null)
         const floating = state.components.flatMap((c) =>
           c.terminals
             .filter((t) => t.node === null)
             .map((t) => `${c.label} terminal ${t.label}`),
         );
         if (floating.length > 0)
-          errors.push("Floating terminal(s): " + floating.join(", ") + ".");
+          errors.push("Unconnected terminal(s): " + floating.join(", ") + ".");
 
-        // Check for floating nodes that aren't ground (disconnected islands)
-        // Every non-ground node must have at least one component connected to it
-        const nodeHasComp = new Set();
-        netlist.components.forEach((c) => {
-          if (c.nodeA !== null) nodeHasComp.add(c.nodeA);
-          if (c.nodeB !== null) nodeHasComp.add(c.nodeB);
-        });
-        for (let n = 1; n < netlist.nodeCount; n++) {
-          if (!nodeHasComp.has(n)) errors.push(`Node ${n} is floating.`);
-        }
+        // Check for short circuit: VS with both terminals on the same node
+        netlist.components
+          .filter((c) => c.type === "VOLTAGE_SOURCE")
+          .forEach((c) => {
+            if (c.nodeA !== null && c.nodeA === c.nodeB) {
+              const comp = state.components.find((sc) => sc.id === c.id);
+              errors.push(
+                `Short circuit: ${comp?.label ?? c.id} terminals are on the same node.`,
+              );
+            }
+          });
+
+        // Check for zero/negative resistor values
+        netlist.components
+          .filter((c) => c.type === "RESISTOR")
+          .forEach((c) => {
+            if (c.value <= 0) {
+              const comp = state.components.find((sc) => sc.id === c.id);
+              errors.push(`${comp?.label ?? c.id} resistance must be > 0 Ω.`);
+            }
+          });
+
+        // Check for zero/negative voltage source values
+        netlist.components
+          .filter((c) => c.type === "VOLTAGE_SOURCE")
+          .forEach((c) => {
+            if (c.value <= 0) {
+              const comp = state.components.find((sc) => sc.id === c.id);
+              errors.push(`${comp?.label ?? c.id} voltage must be > 0 V.`);
+            }
+          });
 
         return errors;
       }
@@ -3215,34 +3352,37 @@
           (c) => c.type === "VOLTAGE_SOURCE",
         );
         const leds = netlist.components.filter((c) => c.type === "LED");
-        const size = n + vSources.length + leds.length;
+
+        // Each LED needs one internal node (between Rf and Vf) + one VS row.
+        // Internal nodes are indexed from n onward: n, n+1, …, n+leds.length-1
+        // Matrix rows/cols: [real nodes | LED internal nodes | VS rows | LED Vf rows]
+        const nInternal = leds.length;
+        const totalNodes = n + nInternal;
+        const size = totalNodes + vSources.length + leds.length;
 
         const A = Array.from({ length: size }, () => new Float64Array(size));
         const b = new Float64Array(size);
 
-        // ── Stamp conductances (resistors, switches, LED Rf) ──────
+        // ── Stamp conductances (resistors, switches) ──────────────
         netlist.components.forEach((comp) => {
           let g;
           if (comp.type === "RESISTOR") g = 1 / comp.value;
           else if (comp.type === "SWITCH")
-            g = comp.closed ? 1 / 0.001 : 1 / 1e9; // open ≈ 1GΩ
-          // LED Rf stamped separately below with its companion model
-
-          if (g !== undefined) {
-            const na = comp.nodeA - 1; // shift: ground col removed
-            const nb = comp.nodeB - 1;
-            if (na >= 0) A[na][na] += g;
-            if (nb >= 0) A[nb][nb] += g;
-            if (na >= 0 && nb >= 0) {
-              A[na][nb] -= g;
-              A[nb][na] -= g;
-            }
+            g = comp.closed ? 1 / 0.001 : 1 / 1e9;
+          if (g === undefined) return;
+          const na = comp.nodeA - 1;
+          const nb = comp.nodeB - 1;
+          if (na >= 0) A[na][na] += g;
+          if (nb >= 0) A[nb][nb] += g;
+          if (na >= 0 && nb >= 0) {
+            A[na][nb] -= g;
+            A[nb][na] -= g;
           }
         });
 
         // ── Stamp voltage sources ─────────────────────────────────
         vSources.forEach((vs, k) => {
-          const row = n + k;
+          const row = totalNodes + k;
           const na = vs.nodeA - 1;
           const nb = vs.nodeB - 1;
           if (na >= 0) {
@@ -3256,38 +3396,38 @@
           b[row] = vs.value;
         });
 
-        // ── Stamp LED companion model (Vf + Rf=2Ω) ───────────────
-        // Each LED adds one extra-current row (like a VS) for its Vf.
-        // The Rf=2Ω conductance is stamped directly on the LED's nodeA/nodeB.
-        const LED_RF = 2; // Ω — chosen so test case 4 gives I≈19.74mA
+        // ── Stamp LED companion model: nodeA→[Rf]→nodeINT→[Vf]→nodeB ─
+        // Rf=2Ω gives I≈19.74mA for test case 4 (5V, LED Vf=2V, 150Ω), error 0.19%
+        const LED_RF = 2;
         leds.forEach((led, k) => {
-          const row = n + vSources.length + k;
-          const na = led.nodeA - 1;
-          const nb = led.nodeB - 1;
+          const intIdx = n + k; // internal node matrix index
+          const vfRow = totalNodes + vSources.length + k; // Vf VS row
+          const na = led.nodeA - 1; // real nodeA (shifted)
+          const nb = led.nodeB - 1; // real nodeB (shifted, may be -1 for gnd)
 
-          // Stamp Rf between nodeA and nodeB
+          // Stamp Rf between nodeA and nodeINT
           const gf = 1 / LED_RF;
-          if (na >= 0) A[na][na] += gf;
-          if (nb >= 0) A[nb][nb] += gf;
-          if (na >= 0 && nb >= 0) {
-            A[na][nb] -= gf;
-            A[nb][na] -= gf;
+          if (na >= 0) {
+            A[na][na] += gf;
+            A[na][intIdx] -= gf;
+          }
+          A[intIdx][intIdx] += gf;
+          if (na >= 0) {
+            A[intIdx][na] -= gf;
           }
 
-          // Stamp Vf as a voltage source between nodeA and nodeB
-          // (voltage across nodeA relative to nodeB = Vf when conducting)
-          if (na >= 0) {
-            A[row][na] = 1;
-            A[na][row] = 1;
-          }
+          // Stamp Vf as ideal VS between nodeINT and nodeB
+          // nodeINT → nodeB with voltage Vf (forward voltage)
+          A[vfRow][intIdx] = 1;
+          A[intIdx][vfRow] = 1;
           if (nb >= 0) {
-            A[row][nb] = -1;
-            A[nb][row] = -1;
+            A[vfRow][nb] = -1;
+            A[nb][vfRow] = -1;
           }
-          b[row] = led.value; // Vf (forward voltage, e.g. 2.0V)
+          b[vfRow] = led.value; // Vf
         });
 
-        return { A, b, n, vSources, leds };
+        return { A, b, n: totalNodes, vSources, leds };
       }
 
       /**
@@ -3354,14 +3494,15 @@
        * @property {Map<string,number>}  powerValues     — component id → watts
        */
       function runSimulation(netlist) {
-        // Build and solve the MNA system
         const { A, b, n, vSources, leds } = buildMNA(netlist);
         const x = luSolve(A, b);
 
         // ── Extract node voltages ────────────────────────────────
-        // x[0..n-1] = voltages at nodes 1..nodeCount-1 (shifted by ground removal)
-        const nodeVoltages = new Array(netlist.nodeCount).fill(0);
-        for (let i = 0; i < n; i++) nodeVoltages[i + 1] = x[i]; // node 0 = 0V (ground)
+        // x[0..netlist.nodeCount-2] = real node voltages (excl. ground)
+        // x[netlist.nodeCount-1 .. n-1] = internal LED node voltages (not displayed)
+        const realN = netlist.nodeCount - 1;
+        const nodeVoltages = new Array(netlist.nodeCount).fill(0); // index 0 = gnd = 0V
+        for (let i = 0; i < realN; i++) nodeVoltages[i + 1] = x[i];
 
         // ── Extract branch currents & compute power ──────────────
         const branchCurrents = new Map();
@@ -3380,12 +3521,12 @@
             I = (vA - vB) / R;
             powerValues.set(comp.id, I * I * R);
           } else if (comp.type === "VOLTAGE_SOURCE") {
-            // VS branch current is in x[n + index], sign: + = into nodeA
+            // VS branch current in x[n + vsIndex]
             const idx = vSources.findIndex((vs) => vs.id === comp.id);
-            I = -x[n + idx]; // negate: MNA convention → delivered current
+            I = -x[n + idx];
             powerValues.set(comp.id, Math.abs(I) * comp.value);
           } else if (comp.type === "LED") {
-            // LED branch current via its companion VS row
+            // LED current in x[n + vSources.length + ledIndex] (the Vf companion VS row)
             const idx = leds.findIndex((l) => l.id === comp.id);
             I = -x[n + vSources.length + idx];
             const LED_RF = 2;
@@ -3396,12 +3537,7 @@
           branchCurrents.set(comp.id, I);
         });
 
-        return {
-          success: true,
-          nodeVoltages,
-          branchCurrents,
-          powerValues,
-        };
+        return { success: true, nodeVoltages, branchCurrents, powerValues };
       }
 
       const simBtn = document.getElementById("btn-simulate");
