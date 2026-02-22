@@ -1448,6 +1448,8 @@
         moveDrag: null,
         wireFromTermId: null, // tsk-103: active wire source terminal id
         hoverTermId: null, // tsk-103: terminal under cursor in wire mode
+        groundTermId: null, // tsk-104: terminal designated as node 0 (ground)
+        netlist: null, // tsk-104: last built netlist (consumed by tsk-105)
       };
 
       const css = (v) =>
@@ -1852,6 +1854,8 @@
           const f = DRAW_FN[c.type];
           if (f) f(ctx, c, state.zoom);
         });
+        // tsk-104: draw ground symbol on the designated terminal
+        if (state.groundTermId) drawGroundSymbol(ctx);
       }
 
       // ── Module 8: Wire Drawing (tsk-103) ─────────────────────
@@ -2532,6 +2536,7 @@
         state.undoStack.push({
           components: JSON.parse(JSON.stringify(state.components)),
           wires: JSON.parse(JSON.stringify(state.wires)),
+          groundTermId: state.groundTermId,
         });
         if (state.undoStack.length > 30) state.undoStack.shift();
       }
@@ -2543,6 +2548,8 @@
         }
         state.components = snap.components;
         state.wires = snap.wires;
+        state.groundTermId = snap.groundTermId ?? null;
+        state.netlist = null;
         state.selectedId = null;
         closeProps();
         updateCount();
@@ -2750,36 +2757,289 @@
         state.components = [];
         state.wires = [];
         state.selectedId = null;
+        state.groundTermId = null;
+        state.netlist = null;
         closeProps();
         updateCount();
         render();
         showToast("Canvas cleared.", "info");
       });
 
+      // ── Module 12: Node Assignment & Netlist Builder (tsk-104) ─
+
+      /**
+       * Union-Find with path compression and union by rank.
+       * O(α·n) per operation — effectively O(1).
+       */
+      class UnionFind {
+        constructor(n) {
+          this.parent = Array.from({ length: n }, (_, i) => i);
+          this.rank = new Array(n).fill(0);
+        }
+        find(x) {
+          if (this.parent[x] !== x) this.parent[x] = this.find(this.parent[x]);
+          return this.parent[x];
+        }
+        union(a, b) {
+          a = this.find(a);
+          b = this.find(b);
+          if (a === b) return;
+          if (this.rank[a] < this.rank[b]) [a, b] = [b, a];
+          this.parent[b] = a;
+          if (this.rank[a] === this.rank[b]) this.rank[a]++;
+        }
+        connected(a, b) {
+          return this.find(a) === this.find(b);
+        }
+      }
+
+      /**
+       * Build a Netlist from current state.components + state.wires.
+       * Assigns node numbers to every terminal via Union-Find.
+       * The ground terminal (state.groundTermId) is forced to node 0.
+       * Returns { nodeCount, groundNode:0, components } or throws on error.
+       */
+      function buildNetlist() {
+        const components = state.components;
+        const wires = state.wires;
+
+        if (components.length === 0)
+          throw new Error("No components on canvas.");
+        if (wires.length === 0)
+          throw new Error("No wires drawn. Connect your components.");
+
+        // ── 1. Index every terminal ──────────────────────────────
+        const allTerminals = components.flatMap((c) => c.terminals);
+        const termIndex = new Map(allTerminals.map((t, i) => [t.id, i]));
+        const uf = new UnionFind(allTerminals.length);
+
+        // ── 2. Union connected terminals via wires ───────────────
+        wires.forEach((w) => {
+          const a = termIndex.get(w.fromTermId);
+          const b = termIndex.get(w.toTermId);
+          if (a !== undefined && b !== undefined) uf.union(a, b);
+        });
+
+        // ── 3. Assign node numbers ───────────────────────────────
+        // Ground terminal gets node 0 first (if designated)
+        const rootToNode = new Map();
+        let nodeCounter = 1; // 0 reserved for ground
+
+        if (state.groundTermId) {
+          const gi = termIndex.get(state.groundTermId);
+          if (gi !== undefined) {
+            rootToNode.set(uf.find(gi), 0);
+          }
+        }
+
+        allTerminals.forEach((t) => {
+          const root = uf.find(termIndex.get(t.id));
+          if (!rootToNode.has(root)) rootToNode.set(root, nodeCounter++);
+          t.node = rootToNode.get(root);
+        });
+
+        // Also stamp node on wires (for tsk-105 netlist completeness)
+        wires.forEach((w) => {
+          const ft = allTerminals.find((t) => t.id === w.fromTermId);
+          w.node = ft ? ft.node : null;
+        });
+
+        const nodeCount = nodeCounter; // includes node 0
+
+        // ── 4. Build NetlistComponent array ─────────────────────
+        const netlistComponents = components.map((comp) => {
+          const tA = comp.terminals.find((t) => t.label === "A");
+          const tB = comp.terminals.find((t) => t.label === "B");
+          return {
+            id: comp.id,
+            type: comp.type,
+            nodeA: tA ? tA.node : null,
+            nodeB: tB ? tB.node : null,
+            value: comp.value,
+            closed: comp.closed,
+          };
+        });
+
+        return {
+          nodeCount,
+          groundNode: 0,
+          components: netlistComponents,
+        };
+      }
+
+      /**
+       * Validate the netlist before handing off to the MNA solver.
+       * Returns array of error strings (empty = valid).
+       */
+      function validateNetlist(netlist) {
+        const errors = [];
+
+        // Must have a ground node
+        const hasGround = netlist.components.some(
+          (c) => c.nodeA === 0 || c.nodeB === 0,
+        );
+        if (!hasGround)
+          errors.push("No ground node. Use the Ground tool (G) to set one.");
+
+        // Must have at least one voltage source
+        const hasVSource = netlist.components.some(
+          (c) => c.type === "VOLTAGE_SOURCE",
+        );
+        if (!hasVSource)
+          errors.push(
+            "No voltage source. Add at least one to drive the circuit.",
+          );
+
+        // Check for floating terminals (node still null = unconnected)
+        const floating = state.components.flatMap((c) =>
+          c.terminals
+            .filter((t) => t.node === null)
+            .map((t) => `${c.label} terminal ${t.label}`),
+        );
+        if (floating.length > 0)
+          errors.push("Floating terminal(s): " + floating.join(", ") + ".");
+
+        // Check for floating nodes that aren't ground (disconnected islands)
+        // Every non-ground node must have at least one component connected to it
+        const nodeHasComp = new Set();
+        netlist.components.forEach((c) => {
+          if (c.nodeA !== null) nodeHasComp.add(c.nodeA);
+          if (c.nodeB !== null) nodeHasComp.add(c.nodeB);
+        });
+        for (let n = 1; n < netlist.nodeCount; n++) {
+          if (!nodeHasComp.has(n)) errors.push(`Node ${n} is floating.`);
+        }
+
+        return errors;
+      }
+
+      // ── Ground tool: draw ⏚ symbol on designated terminal ──────
+
+      function drawGroundSymbol(ctx) {
+        // Find the ground terminal's canvas position
+        let gPos = null;
+        for (const comp of state.components) {
+          const t = comp.terminals.find((t) => t.id === state.groundTermId);
+          if (t) {
+            gPos = termCanvasPos(comp, t);
+            break;
+          }
+        }
+        if (!gPos) return;
+
+        ctx.save();
+        ctx.translate(gPos.x, gPos.y);
+        ctx.strokeStyle = "#475569";
+        ctx.lineWidth = 2 * state.zoom;
+        ctx.lineCap = "round";
+
+        // Short stem down from terminal
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.lineTo(0, 8 * state.zoom);
+        ctx.stroke();
+
+        // Three horizontal bars: 12, 8, 4 px wide, 4px apart
+        [12, 8, 4].forEach((w, i) => {
+          const y = (8 + i * 5) * state.zoom;
+          const hw = (w / 2) * state.zoom;
+          ctx.beginPath();
+          ctx.moveTo(-hw, y);
+          ctx.lineTo(hw, y);
+          ctx.stroke();
+        });
+        ctx.restore();
+      }
+
+      // ── Ground mode: click canvas to set ground terminal ───────
+
+      canvas.addEventListener("mousedown", (e) => {
+        if (e.button !== 0 || state.mode !== "ground") return;
+        const rect = canvas.getBoundingClientRect();
+        const cx = e.clientX - rect.left;
+        const cy = e.clientY - rect.top;
+        const hit = hitTestTerminal(cx, cy);
+        if (!hit) {
+          showToast("Click a terminal dot to set it as ground.", "info", 2000);
+          return;
+        }
+        state.groundTermId = hit.term.id;
+        render();
+        showToast(
+          `${hit.comp.label} terminal ${hit.term.label} set as ground (node 0).`,
+          "success",
+          2000,
+        );
+        setMode("select");
+      });
+
       const simBtn = document.getElementById("btn-simulate");
       const simLabel = document.getElementById("simulate-label");
       let simHasResults = false;
       simBtn.addEventListener("click", () => {
+        // Clear results mode
         if (simHasResults) {
           simBtn.classList.remove("has-results");
           simLabel.textContent = "Simulate";
           simHasResults = false;
+          state.netlist = null;
           setStatus("ready", "Ready");
+          render();
           return;
         }
+
         if (state.components.length === 0) {
           showToast("Add components to the canvas first.", "warning");
           return;
         }
+
         simBtn.classList.add("running");
         simLabel.textContent = "Running…";
         setStatus("active", "Simulating…");
+
+        // Small delay so UI updates before synchronous work
         setTimeout(() => {
-          simBtn.classList.remove("running");
-          showToast("Connect the circuit before simulating.", "warning");
-          simLabel.textContent = "Simulate";
-          setStatus("ready", "Ready");
-        }, 600);
+          try {
+            const netlist = buildNetlist();
+            const errors = validateNetlist(netlist);
+
+            if (errors.length > 0) {
+              simBtn.classList.remove("running");
+              simLabel.textContent = "Simulate";
+              setStatus("ready", "Ready");
+              // Show each error as a separate toast, staggered
+              errors.forEach((msg, i) =>
+                setTimeout(() => showToast(msg, "error", 5000), i * 300),
+              );
+              return;
+            }
+
+            // Netlist is valid — store it for tsk-105 MNA
+            state.netlist = netlist;
+            simBtn.classList.remove("running");
+            simBtn.classList.add("has-results");
+            simLabel.textContent = "Clear";
+            simHasResults = true;
+            setStatus(
+              "active",
+              `Netlist OK — ${netlist.nodeCount} node${netlist.nodeCount !== 1 ? "s" : ""}, ` +
+                `${netlist.components.length} component${netlist.components.length !== 1 ? "s" : ""}`,
+            );
+            showToast(
+              `Netlist built: ${netlist.nodeCount} nodes, ${netlist.components.length} components.`,
+              "success",
+              3000,
+            );
+            // Log full netlist to console for tsk-105 verification
+            console.table(netlist.components);
+            console.log("Full netlist:", netlist);
+          } catch (err) {
+            simBtn.classList.remove("running");
+            simLabel.textContent = "Simulate";
+            setStatus("ready", "Ready");
+            showToast(err.message, "error", 5000);
+          }
+        }, 80);
       });
 
       const ICONS = { success: "✓", warning: "⚠", error: "✕", info: "ℹ" };
