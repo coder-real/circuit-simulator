@@ -1,1848 +1,2472 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Circuit Simulator</title>
-
-  <!-- ═══════════════════════════════════════════════════════
-       FONTS
-       Two fonts only:
-       • Syne        → UI labels, buttons, toolbar, headings
-       • JetBrains Mono → component values, node readouts, code
-  ════════════════════════════════════════════════════════════ -->
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
-
-  <style>
-    /* ═══════════════════════════════════════════════════════
-       SECTION 1 — GLOBAL RESET
-       Removes browser default margins/padding/box-sizing.
-       Every element now has consistent sizing behaviour.
-    ════════════════════════════════════════════════════════ */
-    *, *::before, *::after {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-    }
-
-    /* ═══════════════════════════════════════════════════════
-       SECTION 2 — DESIGN SYSTEM TOKENS
-       Every colour, size, radius, shadow, and font lives here.
-       Nothing is hard-coded anywhere else — always use var().
-
-       HOW TO READ THE COLOUR NAMES:
-       --color-bg-*       → background surfaces
-       --color-border-*   → borders and dividers
-       --color-text-*     → text colours
-       --color-accent-*   → interactive brand blue
-       --color-semantic-* → success / warning / danger
-       --color-comp-*     → circuit component colours
-    ════════════════════════════════════════════════════════ */
-    :root {
-      /* ── Backgrounds ──────────────────────────────────── */
-      --color-bg-app:         #080C14;   /* outermost shell, darkest layer    */
-      --color-bg-toolbar:     #0D1117;   /* top toolbar strip                 */
-      --color-bg-canvas:      #0A0E1A;   /* main circuit workspace            */
-      --color-bg-panel:       #0D1117;   /* right component sidebar           */
-      --color-bg-card:        #131B2E;   /* component panel card              */
-      --color-bg-card-hover:  #1A2744;   /* component card on hover           */
-      --color-bg-modal:       #111827;   /* modal / dropdown background       */
-      --color-bg-input:       #0D1117;   /* text input background             */
-      --color-bg-tooltip:     #1E293B;   /* tooltip background                */
-
-      /* ── Canvas-specific ──────────────────────────────── */
-      --color-canvas-dot:     rgba(96, 165, 250, 0.18); /* grid dot colour   */
-
-      /* ── Borders ──────────────────────────────────────── */
-      --color-border-subtle:  #1A2235;   /* very quiet dividers               */
-      --color-border-default: #1F2D45;   /* standard border                   */
-      --color-border-strong:  #2D4263;   /* visible separator, e.g. panel edge*/
-
-      /* ── Text ─────────────────────────────────────────── */
-      --color-text-primary:   #E8F0FE;   /* headings and main content         */
-      --color-text-secondary: #7E9CC4;   /* labels, captions, muted info      */
-      --color-text-disabled:  #3B506E;   /* disabled states                   */
-      --color-text-accent:    #60A5FA;   /* links, active labels              */
-
-      /* ── Accent (brand blue) ──────────────────────────── */
-      --color-accent:         #4F8EF7;   /* primary interactive colour        */
-      --color-accent-dark:    #2563EB;   /* pressed / focus state             */
-      --color-accent-light:   #1D3461;   /* selection fill behind components  */
-      --color-accent-glow:    rgba(79, 142, 247, 0.30);
-      --color-accent-glow-sm: rgba(79, 142, 247, 0.15);
-
-      /* ── Semantic ─────────────────────────────────────── */
-      --color-success:        #22C55E;
-      --color-success-glow:   rgba(34, 197, 94, 0.25);
-      --color-warning:        #F59E0B;
-      --color-warning-glow:   rgba(245, 158, 11, 0.25);
-      --color-danger:         #EF4444;
-      --color-danger-glow:    rgba(239, 68, 68, 0.25);
-
-      /* ── Component colours (used by canvas renderer) ──── */
-      --color-comp-resistor:  #60A5FA;   /* resistor zigzag stroke           */
-      --color-comp-vsource:   #F59E0B;   /* voltage source ring + label      */
-      --color-comp-led:       #22C55E;   /* LED body + glow when active      */
-      --color-comp-switch:    #94A3B8;   /* switch lever (open)              */
-      --color-comp-switch-on: #22C55E;   /* switch lever (closed)            */
-      --color-comp-ground:    #64748B;   /* ground symbol                    */
-      --color-wire-default:   #60A5FA;   /* default wire draw colour         */
-
-      /* ── Toolbar tool-button active colours ──────────────*/
-      --color-tool-select:    #4F8EF7;
-      --color-tool-wire:      #34D399;
-      --color-tool-ground:    #94A3B8;
-
-      /* ── Typography ───────────────────────────────────── */
-      --font-ui:   'Syne', sans-serif;
-      --font-mono: 'JetBrains Mono', monospace;
-
-      /* Font size scale */
-      --text-2xs: 10px;
-      --text-xs:  11px;
-      --text-sm:  13px;
-      --text-base:15px;
-      --text-lg:  17px;
-      --text-xl:  20px;
-      --text-2xl: 24px;
-      --text-3xl: 28px;
-
-      /* ── Spacing scale ────────────────────────────────── */
-      --sp-1:  4px;
-      --sp-2:  8px;
-      --sp-3:  12px;
-      --sp-4:  16px;
-      --sp-5:  20px;
-      --sp-6:  24px;
-      --sp-8:  32px;
-      --sp-10: 40px;
-
-      /* ── Border radius ────────────────────────────────── */
-      --radius-xs:   3px;
-      --radius-sm:   5px;
-      --radius-md:   8px;
-      --radius-lg:   12px;
-      --radius-xl:   16px;
-      --radius-pill: 999px;
-
-      /* ── Shadows / Elevation ──────────────────────────── */
-      --shadow-sm:    0 1px 4px  rgba(0, 0, 0, 0.50);
-      --shadow-md:    0 4px 14px rgba(0, 0, 0, 0.60);
-      --shadow-lg:    0 8px 28px rgba(0, 0, 0, 0.70);
-      --shadow-glow:  0 0 18px   var(--color-accent-glow);
-      --shadow-glow-sm: 0 0 10px var(--color-accent-glow-sm);
-
-      /* ── Canvas grid ──────────────────────────────────── */
-      --grid-size: 20px;      /* spacing between dots (pixels) */
-      --grid-dot:  1.5px;     /* dot radius                    */
-
-      /* ── Layout ───────────────────────────────────────── */
-      --toolbar-height:  52px;
-      --panel-width:    280px;
-      --panel-min:       60px;  /* collapsed icon-only width */
-
-      /* ── Transitions ──────────────────────────────────── */
-      --transition-fast:   0.12s ease;
-      --transition-base:   0.20s ease;
-      --transition-slow:   0.35s ease;
-    }
-
-
-    /* ═══════════════════════════════════════════════════════
-       SECTION 3 — BASE STYLES
-       Applied to html and body to establish the root
-       background and font. overflow:hidden is important —
-       we do NOT want any browser scrollbars on the app shell.
-    ════════════════════════════════════════════════════════ */
-    html, body {
-      width: 100%;
-      height: 100%;
-      overflow: hidden;
-      background: var(--color-bg-app);
-      color: var(--color-text-primary);
-      font-family: var(--font-ui);
-      font-size: var(--text-base);
-      -webkit-font-smoothing: antialiased;
-      -moz-osx-font-smoothing: grayscale;
-    }
-
-
-    /* ═══════════════════════════════════════════════════════
-       SECTION 4 — APP SHELL (THREE-ZONE GRID LAYOUT)
-
-       The entire application is one CSS Grid container.
-
-       grid-template-areas defines named zones:
-         "toolbar  toolbar"  ← spans full width at top
-         "canvas   panel"    ← canvas grows, panel fixed
-
-       grid-template-rows: 52px (toolbar) then 1fr (fills rest)
-       grid-template-columns: 1fr (canvas) then 280px (panel)
-    ════════════════════════════════════════════════════════ */
-    .app-shell {
-      display: grid;
-      grid-template-rows: var(--toolbar-height) 1fr;
-      grid-template-columns: 1fr var(--panel-width);
-      grid-template-areas:
-        "toolbar  toolbar"
-        "canvas   panel";
-      width:  100vw;
-      height: 100vh;
-      overflow: hidden;
-    }
-
-
-    /* ═══════════════════════════════════════════════════════
-       SECTION 5 — TOOLBAR
-       The top bar spanning the full width.
-       Uses flex to arrange: [left group] [spacer] [right group]
-    ════════════════════════════════════════════════════════ */
-    .toolbar {
-      grid-area: toolbar;
-      display: flex;
-      align-items: center;
-      gap: var(--sp-2);
-      padding: 0 var(--sp-4);
-      background: var(--color-bg-toolbar);
-      border-bottom: 1px solid var(--color-border-default);
-      box-shadow: 0 2px 12px rgba(0, 0, 0, 0.40);
-      /* Keeps toolbar above canvas content (z-index) */
-      position: relative;
-      z-index: 100;
-      user-select: none;
-    }
-
-    /* ── Logo + App title (left side) ──────────────────── */
-    .toolbar-brand {
-      display: flex;
-      align-items: center;
-      gap: var(--sp-2);
-      margin-right: var(--sp-3);
-    }
-    .toolbar-brand-icon {
-      width: 28px;
-      height: 28px;
-      background: var(--color-accent);
-      border-radius: var(--radius-sm);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 15px;
-      box-shadow: var(--shadow-glow-sm);
-      flex-shrink: 0;
-    }
-    .toolbar-brand-name {
-      font-size: var(--text-base);
-      font-weight: 700;
-      letter-spacing: 0.04em;
-      color: var(--color-text-primary);
-    }
-    .toolbar-brand-badge {
-      font-size: var(--text-2xs);
-      font-weight: 600;
-      letter-spacing: 0.08em;
-      color: var(--color-accent);
-      background: var(--color-accent-light);
-      border: 1px solid var(--color-accent);
-      border-radius: var(--radius-pill);
-      padding: 1px 6px;
-      text-transform: uppercase;
-    }
-
-    /* ── Toolbar divider ──────────────────────────────── */
-    .toolbar-divider {
-      width: 1px;
-      height: 24px;
-      background: var(--color-border-default);
-      margin: 0 var(--sp-1);
-      flex-shrink: 0;
-    }
-
-    /* ── Tool buttons (Select / Wire / Ground) ────────── */
-    .tool-group {
-      display: flex;
-      align-items: center;
-      gap: var(--sp-1);
-      background: rgba(255,255,255,0.03);
-      border: 1px solid var(--color-border-subtle);
-      border-radius: var(--radius-md);
-      padding: 3px;
-    }
-    .tool-btn {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      padding: 5px 10px;
-      border: none;
-      border-radius: var(--radius-sm);
-      background: transparent;
-      color: var(--color-text-secondary);
-      font-family: var(--font-ui);
-      font-size: var(--text-sm);
-      font-weight: 600;
-      letter-spacing: 0.02em;
-      cursor: pointer;
-      transition:
-        background var(--transition-fast),
-        color var(--transition-fast),
-        box-shadow var(--transition-fast);
-      white-space: nowrap;
-    }
-    .tool-btn:hover {
-      background: rgba(255,255,255,0.06);
-      color: var(--color-text-primary);
-    }
-    /* Active states — each tool has its own colour */
-    .tool-btn[data-tool="select"].active {
-      background: var(--color-accent-light);
-      color: var(--color-accent);
-      box-shadow: inset 0 0 0 1px var(--color-accent);
-    }
-    .tool-btn[data-tool="wire"].active {
-      background: rgba(52, 211, 153, 0.12);
-      color: var(--color-success);
-      box-shadow: inset 0 0 0 1px var(--color-success);
-    }
-    .tool-btn[data-tool="ground"].active {
-      background: rgba(148, 163, 184, 0.12);
-      color: var(--color-comp-ground);
-      box-shadow: inset 0 0 0 1px var(--color-comp-ground);
-    }
-    .tool-btn svg {
-      width: 14px;
-      height: 14px;
-      stroke: currentColor;
-      fill: none;
-      stroke-width: 2;
-      stroke-linecap: round;
-      stroke-linejoin: round;
-      flex-shrink: 0;
-    }
-
-    /* ── Wire colour swatches ─────────────────────────── */
-    .wire-colors {
-      display: flex;
-      align-items: center;
-      gap: var(--sp-1);
-    }
-    .wire-color-label {
-      font-size: var(--text-xs);
-      font-weight: 600;
-      color: var(--color-text-disabled);
-      letter-spacing: 0.05em;
-      text-transform: uppercase;
-      margin-right: 2px;
-    }
-    .color-swatch {
-      width: 18px;
-      height: 18px;
-      border-radius: var(--radius-pill);
-      border: 2px solid transparent;
-      cursor: pointer;
-      transition:
-        transform var(--transition-fast),
-        border-color var(--transition-fast),
-        box-shadow var(--transition-fast);
-    }
-    .color-swatch:hover {
-      transform: scale(1.2);
-    }
-    .color-swatch.active {
-      border-color: #fff;
-      box-shadow: 0 0 8px currentColor;
-      transform: scale(1.15);
-    }
-
-    /* ── Flexible space between left and right groups ─── */
-    .toolbar-spacer {
-      flex: 1;
-    }
-
-    /* ── Zoom controls ────────────────────────────────── */
-    .zoom-group {
-      display: flex;
-      align-items: center;
-      gap: 2px;
-      background: rgba(255,255,255,0.03);
-      border: 1px solid var(--color-border-subtle);
-      border-radius: var(--radius-md);
-      padding: 3px;
-    }
-    .zoom-btn {
-      width: 28px;
-      height: 28px;
-      border: none;
-      border-radius: var(--radius-xs);
-      background: transparent;
-      color: var(--color-text-secondary);
-      font-family: var(--font-ui);
-      font-size: var(--text-lg);
-      font-weight: 700;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      line-height: 1;
-      transition: background var(--transition-fast), color var(--transition-fast);
-    }
-    .zoom-btn:hover {
-      background: rgba(255,255,255,0.07);
-      color: var(--color-text-primary);
-    }
-    .zoom-level {
-      font-family: var(--font-mono);
-      font-size: var(--text-xs);
-      font-weight: 500;
-      color: var(--color-text-secondary);
-      min-width: 38px;
-      text-align: center;
-      letter-spacing: 0.02em;
-    }
-
-    /* ── Clear button ─────────────────────────────────── */
-    .btn-clear {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      padding: 6px 12px;
-      border: 1px solid var(--color-border-default);
-      border-radius: var(--radius-sm);
-      background: transparent;
-      color: var(--color-text-secondary);
-      font-family: var(--font-ui);
-      font-size: var(--text-sm);
-      font-weight: 600;
-      cursor: pointer;
-      transition:
-        border-color var(--transition-fast),
-        color var(--transition-fast),
-        background var(--transition-fast);
-    }
-    .btn-clear:hover {
-      border-color: var(--color-danger);
-      color: var(--color-danger);
-      background: rgba(239, 68, 68, 0.08);
-    }
-
-    /* ── Simulate button (primary CTA) ───────────────── */
-    .btn-simulate {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 7px 18px;
-      border: none;
-      border-radius: var(--radius-sm);
-      background: var(--color-accent);
-      color: #fff;
-      font-family: var(--font-ui);
-      font-size: var(--text-sm);
-      font-weight: 700;
-      letter-spacing: 0.04em;
-      text-transform: uppercase;
-      cursor: pointer;
-      transition:
-        background var(--transition-fast),
-        box-shadow var(--transition-fast),
-        transform var(--transition-fast);
-      position: relative;
-      overflow: hidden;
-    }
-    .btn-simulate::before {
-      /* Shimmer layer — slides across on hover */
-      content: '';
-      position: absolute;
-      inset: 0;
-      background: linear-gradient(
-        90deg,
-        transparent 0%,
-        rgba(255,255,255,0.15) 50%,
-        transparent 100%
-      );
-      transform: translateX(-100%);
-      transition: transform 0.5s ease;
-    }
-    .btn-simulate:hover {
-      background: var(--color-accent-dark);
-      box-shadow: var(--shadow-glow);
-      transform: translateY(-1px);
-    }
-    .btn-simulate:hover::before {
-      transform: translateX(100%);
-    }
-    .btn-simulate:active {
-      transform: translateY(0);
-    }
-    /* Running state — pulsing glow animation */
-    .btn-simulate.running {
-      background: var(--color-accent-dark);
-      animation: simulate-pulse 1.2s ease-in-out infinite alternate;
-    }
-    @keyframes simulate-pulse {
-      from { box-shadow: 0 0  8px var(--color-accent-glow); }
-      to   { box-shadow: 0 0 24px var(--color-accent-glow); }
-    }
-    /* Results-showing state */
-    .btn-simulate.has-results {
-      background: var(--color-success);
-    }
-    .btn-simulate.has-results:hover {
-      background: #16A34A;
-      box-shadow: 0 0 18px var(--color-success-glow);
-    }
-    .btn-simulate svg {
-      width: 14px;
-      height: 14px;
-      stroke: currentColor;
-      fill: none;
-      stroke-width: 2.5;
-      stroke-linecap: round;
-      stroke-linejoin: round;
-      flex-shrink: 0;
-    }
-
-
-    /* ═══════════════════════════════════════════════════════
-       SECTION 6 — CANVAS WRAPPER
-       The main workspace area. The <canvas> element inside
-       this fills the wrapper completely.
-       position:relative is needed so absolute children
-       (toasts, overlays) are positioned relative to this zone.
-    ════════════════════════════════════════════════════════ */
-    .canvas-wrap {
-      grid-area: canvas;
-      position: relative;
-      overflow: hidden;
-      background: var(--color-bg-canvas);
-      /* Subtle inner shadow to distinguish canvas edge */
-      box-shadow: inset 0 0 60px rgba(0, 0, 0, 0.30);
-    }
-
-    /* The actual HTML5 canvas element */
-    #circuit-canvas {
-      display: block;
-      width: 100%;
-      height: 100%;
-      cursor: default;
-    }
-
-    /* Cursor changes based on app mode (set via JS on canvas-wrap) */
-    .canvas-wrap[data-mode="wire"]   #circuit-canvas { cursor: crosshair; }
-    .canvas-wrap[data-mode="pan"]    #circuit-canvas { cursor: grabbing; }
-    .canvas-wrap[data-mode="select"] #circuit-canvas { cursor: default; }
-
-    /* ── Canvas coordinate readout (bottom-left) ─────── */
-    .canvas-coords {
-      position: absolute;
-      bottom: var(--sp-3);
-      left: var(--sp-4);
-      font-family: var(--font-mono);
-      font-size: var(--text-xs);
-      color: var(--color-text-disabled);
-      letter-spacing: 0.04em;
-      pointer-events: none;
-      user-select: none;
-    }
-
-    /* ── Canvas status badge (top-left) ──────────────── */
-    .canvas-status {
-      position: absolute;
-      top: var(--sp-4);
-      left: var(--sp-4);
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      font-family: var(--font-ui);
-      font-size: var(--text-xs);
-      font-weight: 600;
-      color: var(--color-text-secondary);
-      letter-spacing: 0.05em;
-      text-transform: uppercase;
-      background: rgba(13, 17, 23, 0.80);
-      border: 1px solid var(--color-border-subtle);
-      border-radius: var(--radius-pill);
-      padding: 4px 10px;
-      backdrop-filter: blur(6px);
-      pointer-events: none;
-      user-select: none;
-    }
-    .canvas-status-dot {
-      width: 6px;
-      height: 6px;
-      border-radius: 50%;
-      background: var(--color-text-disabled);
-      flex-shrink: 0;
-    }
-    .canvas-status-dot.ready  { background: var(--color-success); box-shadow: 0 0 6px var(--color-success-glow); }
-    .canvas-status-dot.active { background: var(--color-warning); box-shadow: 0 0 6px var(--color-warning-glow); animation: blink 1s infinite; }
-    .canvas-status-dot.error  { background: var(--color-danger);  box-shadow: 0 0 6px var(--color-danger-glow);  }
-    @keyframes blink { 0%,100% { opacity:1; } 50% { opacity:0.3; } }
-
-    /* ── Toast notifications (bottom-centre of canvas) ── */
-    .toast-container {
-      position: absolute;
-      bottom: var(--sp-6);
-      left: 50%;
-      transform: translateX(-50%);
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: var(--sp-2);
-      pointer-events: none;
-      z-index: 200;
-    }
-    .toast {
-      display: flex;
-      align-items: center;
-      gap: var(--sp-3);
-      padding: var(--sp-3) var(--sp-5);
-      background: var(--color-bg-modal);
-      border: 1px solid var(--color-border-default);
-      border-left: 4px solid var(--color-accent);
-      border-radius: var(--radius-md);
-      box-shadow: var(--shadow-lg);
-      font-family: var(--font-ui);
-      font-size: var(--text-sm);
-      font-weight: 500;
-      color: var(--color-text-primary);
-      white-space: nowrap;
-      backdrop-filter: blur(10px);
-      /* Start hidden below, slides up */
-      opacity: 0;
-      transform: translateY(16px);
-      transition:
-        opacity   var(--transition-base),
-        transform var(--transition-base);
-    }
-    .toast.visible {
-      opacity: 1;
-      transform: translateY(0);
-    }
-    .toast.success { border-left-color: var(--color-success); }
-    .toast.warning { border-left-color: var(--color-warning); }
-    .toast.error   { border-left-color: var(--color-danger);  }
-    .toast-icon {
-      font-size: 15px;
-      flex-shrink: 0;
-    }
-
-
-    /* ═══════════════════════════════════════════════════════
-       SECTION 7 — COMPONENT PANEL (RIGHT SIDEBAR)
-       Fixed-width panel on the right. Divided into:
-       - Panel header (title + collapse toggle)
-       - Search/filter input
-       - Component section (Passive / Sources / Output)
-       - Properties panel (appears on component selection)
-    ════════════════════════════════════════════════════════ */
-    .panel {
-      grid-area: panel;
-      display: flex;
-      flex-direction: column;
-      background: var(--color-bg-panel);
-      border-left: 1px solid var(--color-border-strong);
-      overflow: hidden;
-      z-index: 50;
-    }
-
-    /* ── Panel header ─────────────────────────────────── */
-    .panel-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: var(--sp-3) var(--sp-4);
-      border-bottom: 1px solid var(--color-border-subtle);
-      flex-shrink: 0;
-    }
-    .panel-title {
-      font-size: var(--text-sm);
-      font-weight: 700;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-      color: var(--color-text-secondary);
-    }
-    .panel-component-count {
-      font-family: var(--font-mono);
-      font-size: var(--text-xs);
-      color: var(--color-text-disabled);
-      background: rgba(255,255,255,0.05);
-      border: 1px solid var(--color-border-subtle);
-      border-radius: var(--radius-pill);
-      padding: 1px 8px;
-    }
-
-    /* ── Panel scrollable body ────────────────────────── */
-    .panel-body {
-      flex: 1;
-      overflow-y: auto;
-      overflow-x: hidden;
-      padding: var(--sp-3) var(--sp-3);
-      display: flex;
-      flex-direction: column;
-      gap: var(--sp-4);
-    }
-    /* Custom scrollbar — thin and dark */
-    .panel-body::-webkit-scrollbar { width: 4px; }
-    .panel-body::-webkit-scrollbar-track { background: transparent; }
-    .panel-body::-webkit-scrollbar-thumb {
-      background: var(--color-border-default);
-      border-radius: var(--radius-pill);
-    }
-    .panel-body::-webkit-scrollbar-thumb:hover {
-      background: var(--color-border-strong);
-    }
-
-    /* ── Component section (group heading + cards) ────── */
-    .component-section {
-      display: flex;
-      flex-direction: column;
-      gap: var(--sp-2);
-    }
-    .component-section-title {
-      font-size: var(--text-2xs);
-      font-weight: 700;
-      letter-spacing: 0.10em;
-      text-transform: uppercase;
-      color: var(--color-text-disabled);
-      padding: 0 var(--sp-1);
-      margin-bottom: 2px;
-    }
-
-    /* ── Component card ───────────────────────────────── */
-    .component-card {
-      display: flex;
-      align-items: center;
-      gap: var(--sp-3);
-      padding: var(--sp-3);
-      background: var(--color-bg-card);
-      border: 1px solid var(--color-border-subtle);
-      border-radius: var(--radius-md);
-      cursor: grab;
-      user-select: none;
-      transition:
-        background      var(--transition-fast),
-        border-color    var(--transition-fast),
-        transform       var(--transition-fast),
-        box-shadow      var(--transition-fast);
-      position: relative;
-      overflow: hidden;
-    }
-    /* Shimmer left bar — coloured accent per component */
-    .component-card::before {
-      content: '';
-      position: absolute;
-      left: 0; top: 0; bottom: 0;
-      width: 3px;
-      background: var(--card-accent, var(--color-accent));
-      border-radius: var(--radius-pill) 0 0 var(--radius-pill);
-      opacity: 0;
-      transition: opacity var(--transition-fast);
-    }
-    .component-card:hover {
-      background: var(--color-bg-card-hover);
-      border-color: var(--card-accent, var(--color-accent));
-      transform: translateX(3px);
-      box-shadow: var(--shadow-sm);
-    }
-    .component-card:hover::before {
-      opacity: 1;
-    }
-    .component-card:active { cursor: grabbing; transform: scale(0.97); }
-
-    /* Component icon box */
-    .card-icon {
-      width: 40px;
-      height: 32px;
-      flex-shrink: 0;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-    .card-icon svg {
-      width: 38px;
-      height: 28px;
-      overflow: visible;
-    }
-
-    /* Component text */
-    .card-info {
-      flex: 1;
-      min-width: 0;
-    }
-    .card-name {
-      font-size: var(--text-sm);
-      font-weight: 600;
-      color: var(--color-text-primary);
-      letter-spacing: 0.01em;
-    }
-    .card-default {
-      font-family: var(--font-mono);
-      font-size: var(--text-xs);
-      color: var(--color-text-secondary);
-      margin-top: 2px;
-    }
-
-    /* Drag handle icon */
-    .card-handle {
-      color: var(--color-text-disabled);
-      font-size: 14px;
-      opacity: 0;
-      transition: opacity var(--transition-fast);
-    }
-    .component-card:hover .card-handle { opacity: 1; }
-
-
-    /* ═══════════════════════════════════════════════════════
-       SECTION 8 — PROPERTIES PANEL
-       Slides up from the bottom of the sidebar when a
-       component is selected on the canvas.
-    ════════════════════════════════════════════════════════ */
-    .properties-panel {
-      border-top: 1px solid var(--color-border-default);
-      background: var(--color-bg-app);
-      flex-shrink: 0;
-      overflow: hidden;
-      /* Hidden by default — max-height transition for smooth reveal */
-      max-height: 0;
-      transition: max-height var(--transition-slow);
-    }
-    .properties-panel.open {
-      max-height: 220px;
-    }
-    .properties-inner {
-      padding: var(--sp-4);
-      display: flex;
-      flex-direction: column;
-      gap: var(--sp-3);
-    }
-    .properties-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-    }
-    .properties-title {
-      font-size: var(--text-sm);
-      font-weight: 700;
-      letter-spacing: 0.06em;
-      text-transform: uppercase;
-      color: var(--color-text-secondary);
-    }
-    .properties-id {
-      font-family: var(--font-mono);
-      font-size: var(--text-xs);
-      color: var(--color-text-disabled);
-    }
-    /* Property row: label + input */
-    .property-row {
-      display: flex;
-      align-items: center;
-      gap: var(--sp-3);
-    }
-    .property-label {
-      font-size: var(--text-xs);
-      font-weight: 600;
-      color: var(--color-text-secondary);
-      letter-spacing: 0.04em;
-      text-transform: uppercase;
-      width: 64px;
-      flex-shrink: 0;
-    }
-    .property-input {
-      flex: 1;
-      padding: 6px 10px;
-      background: var(--color-bg-input);
-      border: 1px solid var(--color-border-default);
-      border-radius: var(--radius-sm);
-      color: var(--color-text-primary);
-      font-family: var(--font-mono);
-      font-size: var(--text-sm);
-      font-weight: 500;
-      outline: none;
-      transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
-    }
-    .property-input:focus {
-      border-color: var(--color-accent);
-      box-shadow: 0 0 0 3px var(--color-accent-glow-sm);
-    }
-    .property-unit {
-      font-family: var(--font-mono);
-      font-size: var(--text-xs);
-      font-weight: 500;
-      color: var(--color-text-disabled);
-      width: 24px;
-      flex-shrink: 0;
-    }
-    /* Property action buttons row */
-    .property-actions {
-      display: flex;
-      gap: var(--sp-2);
-    }
-    .prop-btn {
-      flex: 1;
-      padding: 6px;
-      border-radius: var(--radius-sm);
-      border: 1px solid var(--color-border-default);
-      background: transparent;
-      color: var(--color-text-secondary);
-      font-family: var(--font-ui);
-      font-size: var(--text-xs);
-      font-weight: 600;
-      letter-spacing: 0.04em;
-      cursor: pointer;
-      transition: all var(--transition-fast);
-      text-align: center;
-    }
-    .prop-btn:hover { background: rgba(255,255,255,0.06); color: var(--color-text-primary); }
-    .prop-btn.rotate:hover { border-color: var(--color-accent); color: var(--color-accent); }
-    .prop-btn.delete:hover { border-color: var(--color-danger); color: var(--color-danger); background: rgba(239,68,68,0.08); }
-
-
-    /* ═══════════════════════════════════════════════════════
-       SECTION 9 — KEYBOARD SHORTCUTS OVERLAY
-       A compact cheatsheet that appears when the user
-       presses ? — helps new users discover shortcuts.
-    ════════════════════════════════════════════════════════ */
-    .shortcuts-overlay {
-      position: fixed;
-      inset: 0;
-      background: rgba(0, 0, 0, 0.70);
-      backdrop-filter: blur(6px);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      z-index: 1000;
-      opacity: 0;
-      pointer-events: none;
-      transition: opacity var(--transition-base);
-    }
-    .shortcuts-overlay.open {
-      opacity: 1;
-      pointer-events: all;
-    }
-    .shortcuts-card {
-      background: var(--color-bg-modal);
-      border: 1px solid var(--color-border-strong);
-      border-radius: var(--radius-xl);
-      padding: var(--sp-8);
-      min-width: 360px;
-      box-shadow: var(--shadow-lg);
-    }
-    .shortcuts-heading {
-      font-size: var(--text-xl);
-      font-weight: 800;
-      color: var(--color-text-primary);
-      margin-bottom: var(--sp-6);
-      letter-spacing: -0.01em;
-    }
-    .shortcut-row {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: var(--sp-2) 0;
-      border-bottom: 1px solid var(--color-border-subtle);
-    }
-    .shortcut-row:last-child { border-bottom: none; }
-    .shortcut-desc {
-      font-size: var(--text-sm);
-      color: var(--color-text-secondary);
-    }
-    .shortcut-keys {
-      display: flex;
-      gap: 4px;
-    }
-    .key {
-      font-family: var(--font-mono);
-      font-size: var(--text-xs);
-      font-weight: 600;
-      padding: 2px 8px;
-      background: rgba(255,255,255,0.07);
-      border: 1px solid var(--color-border-default);
-      border-bottom: 2px solid var(--color-border-strong);
-      border-radius: var(--radius-xs);
-      color: var(--color-text-primary);
-    }
-
-
-    /* ═══════════════════════════════════════════════════════
-       SECTION 10 — CONFIRMATION MODAL
-       Used for "Clear Canvas" confirmation.
-    ════════════════════════════════════════════════════════ */
-    .modal-overlay {
-      position: fixed;
-      inset: 0;
-      background: rgba(0,0,0,0.65);
-      backdrop-filter: blur(4px);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      z-index: 900;
-      opacity: 0;
-      pointer-events: none;
-      transition: opacity var(--transition-base);
-    }
-    .modal-overlay.open {
-      opacity: 1;
-      pointer-events: all;
-    }
-    .modal-card {
-      background: var(--color-bg-modal);
-      border: 1px solid var(--color-border-strong);
-      border-radius: var(--radius-xl);
-      padding: var(--sp-8);
-      max-width: 360px;
-      width: 100%;
-      box-shadow: var(--shadow-lg);
-      transform: translateY(12px);
-      transition: transform var(--transition-base);
-    }
-    .modal-overlay.open .modal-card { transform: translateY(0); }
-    .modal-icon { font-size: 32px; margin-bottom: var(--sp-4); }
-    .modal-title {
-      font-size: var(--text-2xl);
-      font-weight: 800;
-      color: var(--color-text-primary);
-      margin-bottom: var(--sp-2);
-    }
-    .modal-body {
-      font-size: var(--text-sm);
-      color: var(--color-text-secondary);
-      line-height: 1.6;
-      margin-bottom: var(--sp-6);
-    }
-    .modal-actions {
-      display: flex;
-      gap: var(--sp-3);
-      justify-content: flex-end;
-    }
-    .modal-btn {
-      padding: 8px 20px;
-      border-radius: var(--radius-sm);
-      font-family: var(--font-ui);
-      font-size: var(--text-sm);
-      font-weight: 700;
-      cursor: pointer;
-      transition: all var(--transition-fast);
-    }
-    .modal-btn.cancel {
-      border: 1px solid var(--color-border-default);
-      background: transparent;
-      color: var(--color-text-secondary);
-    }
-    .modal-btn.cancel:hover {
-      border-color: var(--color-text-secondary);
-      color: var(--color-text-primary);
-    }
-    .modal-btn.confirm {
-      border: none;
-      background: var(--color-danger);
-      color: #fff;
-    }
-    .modal-btn.confirm:hover {
-      background: #DC2626;
-      box-shadow: 0 0 16px var(--color-danger-glow);
-    }
-
-
-    /* ═══════════════════════════════════════════════════════
-       SECTION 11 — TOOLTIP
-    ════════════════════════════════════════════════════════ */
-    .tooltip {
-      position: fixed;
-      z-index: 500;
-      padding: var(--sp-2) var(--sp-3);
-      background: var(--color-bg-tooltip);
-      border: 1px solid var(--color-border-default);
-      border-radius: var(--radius-sm);
-      font-family: var(--font-ui);
-      font-size: var(--text-xs);
-      font-weight: 500;
-      color: var(--color-text-primary);
-      box-shadow: var(--shadow-md);
-      pointer-events: none;
-      opacity: 0;
-      transform: translateY(4px);
-      transition: opacity 0.15s, transform 0.15s;
-      max-width: 220px;
-      line-height: 1.5;
-    }
-    .tooltip.visible {
-      opacity: 1;
-      transform: translateY(0);
-    }
-  </style>
-</head>
-
-<body>
-
-  <!-- ═══════════════════════════════════════════════════
-       APP SHELL — Three-zone CSS Grid container
-       Everything lives inside this one div.
-  ════════════════════════════════════════════════════ -->
-  <div class="app-shell">
-
-
-    <!-- ═══════════════════════════════════════════════
-         TOOLBAR
-    ════════════════════════════════════════════════ -->
-    <header class="toolbar" role="banner">
-
-      <!-- Brand / Logo -->
-      <div class="toolbar-brand">
-        <div class="toolbar-brand-icon" aria-hidden="true">⚡</div>
-        <span class="toolbar-brand-name">CircuitSim</span>
-        <span class="toolbar-brand-badge">MVP</span>
-      </div>
-
-      <div class="toolbar-divider" role="separator"></div>
-
-      <!-- Tool selection: Select / Wire / Ground -->
-      <div class="tool-group" role="toolbar" aria-label="Drawing tools">
-        <button class="tool-btn active" data-tool="select" title="Select & Move (S)" aria-pressed="true">
-          <svg viewBox="0 0 16 16"><path d="M3 2l10 5.5-5.5 1L5 14 3 2z"/></svg>
-          Select
-        </button>
-        <button class="tool-btn" data-tool="wire" title="Draw Wire (W)" aria-pressed="false">
-          <svg viewBox="0 0 16 16"><path d="M2 8h4M10 8h4M6 8a2 2 0 0 0 4 0 2 2 0 0 0-4 0z"/></svg>
-          Wire
-        </button>
-        <button class="tool-btn" data-tool="ground" title="Place Ground (G)" aria-pressed="false">
-          <svg viewBox="0 0 16 16"><path d="M8 2v8M4 10h8M5.5 12.5h5M7 15h2"/></svg>
-          Ground
-        </button>
-      </div>
-
-      <div class="toolbar-divider" role="separator"></div>
-
-      <!-- Wire colour swatches -->
-      <div class="wire-colors" role="group" aria-label="Wire colour">
-        <span class="wire-color-label">Wire</span>
-        <button class="color-swatch active" style="background:#60A5FA;" data-color="#60A5FA" title="Blue"   aria-label="Blue wire"></button>
-        <button class="color-swatch"        style="background:#34D399;" data-color="#34D399" title="Green"  aria-label="Green wire"></button>
-        <button class="color-swatch"        style="background:#F87171;" data-color="#F87171" title="Red"    aria-label="Red wire"></button>
-        <button class="color-swatch"        style="background:#FBBF24;" data-color="#FBBF24" title="Yellow" aria-label="Yellow wire"></button>
-        <button class="color-swatch"        style="background:#E2E8F0;" data-color="#E2E8F0" title="White"  aria-label="White wire"></button>
-      </div>
-
-      <!-- Flexible gap pushes right-side controls to the right -->
-      <div class="toolbar-spacer" aria-hidden="true"></div>
-
-      <!-- Zoom controls -->
-      <div class="zoom-group" role="group" aria-label="Zoom controls">
-        <button class="zoom-btn" id="btn-zoom-out" title="Zoom out (−)" aria-label="Zoom out">−</button>
-        <span   class="zoom-level" id="zoom-display" aria-live="polite" aria-label="Current zoom">100%</span>
-        <button class="zoom-btn" id="btn-zoom-in"  title="Zoom in (+)"  aria-label="Zoom in">+</button>
-      </div>
-
-      <div class="toolbar-divider" role="separator"></div>
-
-      <!-- Clear canvas -->
-      <button class="btn-clear" id="btn-clear" title="Clear all components and wires">
-        <svg width="13" height="13" viewBox="0 0 16 16" stroke="currentColor" fill="none" stroke-width="2" stroke-linecap="round">
-          <path d="M3 3l10 10M13 3L3 13"/>
-        </svg>
-        Clear
-      </button>
-
-      <!-- Simulate (primary CTA) -->
-      <button class="btn-simulate" id="btn-simulate" aria-label="Run simulation">
-        <svg viewBox="0 0 16 16"><polygon points="4,2 14,8 4,14" fill="currentColor" stroke="none"/></svg>
-        <span id="simulate-label">Simulate</span>
-      </button>
-
-    </header><!-- /toolbar -->
-
-
-    <!-- ═══════════════════════════════════════════════
-         CANVAS WORKSPACE
-    ════════════════════════════════════════════════ -->
-    <main class="canvas-wrap" id="canvas-wrap" data-mode="select" role="main" aria-label="Circuit canvas">
-
-      <!-- The drawing surface -->
-      <canvas id="circuit-canvas" aria-label="Circuit drawing area"></canvas>
-
-      <!-- Top-left status badge -->
-      <div class="canvas-status" id="canvas-status" aria-live="polite">
-        <span class="canvas-status-dot ready" id="status-dot"></span>
-        <span id="status-text">Ready</span>
-      </div>
-
-      <!-- Bottom-left coordinate readout -->
-      <div class="canvas-coords" id="canvas-coords" aria-hidden="true">x: 0 &nbsp; y: 0</div>
-
-      <!-- Toast notification container -->
-      <div class="toast-container" id="toast-container" aria-live="assertive" aria-atomic="true"></div>
-
-    </main><!-- /canvas-wrap -->
-
-
-    <!-- ═══════════════════════════════════════════════
-         COMPONENT PANEL (RIGHT SIDEBAR)
-    ════════════════════════════════════════════════ -->
-    <aside class="panel" role="complementary" aria-label="Component library">
-
-      <div class="panel-header">
-        <span class="panel-title">Components</span>
-        <span class="panel-component-count" id="canvas-component-count">0 on canvas</span>
-      </div>
-
-      <div class="panel-body">
-
-        <!-- Section: Passive components -->
-        <div class="component-section">
-          <div class="component-section-title">Passive</div>
-
-          <!-- Resistor card -->
-          <div class="component-card"
-               draggable="true"
-               data-type="RESISTOR"
-               style="--card-accent: var(--color-comp-resistor)"
-               title="Resistor — drag onto canvas"
-               tabindex="0"
-               role="button"
-               aria-label="Resistor component, default 1000 Ω">
-            <div class="card-icon">
-              <!-- Resistor SVG symbol (IEEE zigzag) -->
-              <svg viewBox="-22 -10 44 20" stroke="var(--color-comp-resistor)" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                <line x1="-20" y1="0" x2="-12" y2="0"/>
-                <polyline points="-12,0 -9,-6 -6,6 -3,-6 0,6 3,-6 6,6 9,-6 12,0"/>
-                <line x1="12" y1="0" x2="20" y2="0"/>
-                <!-- Terminal dots -->
-                <circle cx="-20" cy="0" r="1.5" fill="var(--color-comp-resistor)"/>
-                <circle cx="20"  cy="0" r="1.5" fill="var(--color-comp-resistor)"/>
-              </svg>
-            </div>
-            <div class="card-info">
-              <div class="card-name">Resistor</div>
-              <div class="card-default">1000 Ω</div>
-            </div>
-            <span class="card-handle" aria-hidden="true">⠿</span>
-          </div>
-
-        </div><!-- /passive -->
-
-        <!-- Section: Sources -->
-        <div class="component-section">
-          <div class="component-section-title">Sources</div>
-
-          <!-- Voltage Source card -->
-          <div class="component-card"
-               draggable="true"
-               data-type="VOLTAGE_SOURCE"
-               style="--card-accent: var(--color-comp-vsource)"
-               title="Voltage Source — drag onto canvas"
-               tabindex="0"
-               role="button"
-               aria-label="Voltage source component, default 9 V">
-            <div class="card-icon">
-              <!-- Voltage source SVG symbol (circle with +/−) -->
-              <svg viewBox="-22 -12 44 24" stroke="var(--color-comp-vsource)" fill="none" stroke-width="1.8" stroke-linecap="round">
-                <line x1="-20" y1="0" x2="-10" y2="0"/>
-                <circle cx="0" cy="0" r="10" stroke="var(--color-comp-vsource)"/>
-                <line x1="0" y1="-5" x2="0" y2="5"/>
-                <line x1="-4" y1="0" x2="4" y2="0" stroke-width="2.5"/>
-                <!-- + on top, − on bottom -->
-                <text x="4" y="-2" fill="var(--color-comp-vsource)" stroke="none" font-size="5" font-family="Syne,sans-serif" font-weight="700">+</text>
-                <line x1="10" y1="0" x2="20" y2="0"/>
-                <!-- Terminal dots -->
-                <circle cx="-20" cy="0" r="1.5" fill="var(--color-comp-vsource)"/>
-                <circle cx="20"  cy="0" r="1.5" fill="var(--color-comp-vsource)"/>
-              </svg>
-            </div>
-            <div class="card-info">
-              <div class="card-name">Voltage Source</div>
-              <div class="card-default">9 V</div>
-            </div>
-            <span class="card-handle" aria-hidden="true">⠿</span>
-          </div>
-
-        </div><!-- /sources -->
-
-        <!-- Section: Output components -->
-        <div class="component-section">
-          <div class="component-section-title">Output</div>
-
-          <!-- LED card -->
-          <div class="component-card"
-               draggable="true"
-               data-type="LED"
-               style="--card-accent: var(--color-comp-led)"
-               title="LED — drag onto canvas"
-               tabindex="0"
-               role="button"
-               aria-label="LED component, 2V forward voltage">
-            <div class="card-icon">
-              <!-- LED SVG symbol (diode triangle + arrow lines) -->
-              <svg viewBox="-22 -12 44 24" stroke="var(--color-comp-led)" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                <line x1="-20" y1="0" x2="-8" y2="0"/>
-                <polygon points="-8,-8 -8,8 8,0" fill="rgba(34,197,94,0.20)" stroke="var(--color-comp-led)" stroke-width="1.8"/>
-                <line x1="8" y1="-8" x2="8" y2="8"/>
-                <line x1="8" y1="0" x2="20" y2="0"/>
-                <!-- Light emission arrows -->
-                <line x1="12" y1="-6" x2="17" y2="-11" stroke-width="1.2"/>
-                <line x1="16" y1="-3" x2="21" y2="-8"  stroke-width="1.2"/>
-                <!-- Terminal dots -->
-                <circle cx="-20" cy="0" r="1.5" fill="var(--color-comp-led)"/>
-                <circle cx="20"  cy="0" r="1.5" fill="var(--color-comp-led)"/>
-              </svg>
-            </div>
-            <div class="card-info">
-              <div class="card-name">LED</div>
-              <div class="card-default">Vf = 2.0 V</div>
-            </div>
-            <span class="card-handle" aria-hidden="true">⠿</span>
-          </div>
-
-          <!-- Switch card -->
-          <div class="component-card"
-               draggable="true"
-               data-type="SWITCH"
-               style="--card-accent: var(--color-comp-switch)"
-               title="Switch — drag onto canvas"
-               tabindex="0"
-               role="button"
-               aria-label="Switch component, normally open">
-            <div class="card-icon">
-              <!-- Switch SVG symbol (open lever) -->
-              <svg viewBox="-22 -12 44 24" stroke="var(--color-comp-switch)" fill="none" stroke-width="1.8" stroke-linecap="round">
-                <line x1="-20" y1="0" x2="-8" y2="0"/>
-                <circle cx="-8" cy="0" r="1.8" fill="var(--color-comp-switch)"/>
-                <!-- Lever (open = angled up) -->
-                <line x1="-8" y1="0" x2="8" y2="-8"/>
-                <circle cx="8" cy="0" r="1.8" fill="var(--color-comp-switch)"/>
-                <line x1="8" y1="0" x2="20" y2="0"/>
-                <!-- Terminal dots -->
-                <circle cx="-20" cy="0" r="1.5" fill="var(--color-comp-switch)"/>
-                <circle cx="20"  cy="0" r="1.5" fill="var(--color-comp-switch)"/>
-              </svg>
-            </div>
-            <div class="card-info">
-              <div class="card-name">Switch</div>
-              <div class="card-default">Normally open</div>
-            </div>
-            <span class="card-handle" aria-hidden="true">⠿</span>
-          </div>
-
-        </div><!-- /output -->
-
-        <!-- Keyboard shortcut hint at the bottom of panel -->
-        <div style="margin-top: auto; padding-top: var(--sp-4);">
-          <button onclick="document.getElementById('shortcuts-overlay').classList.add('open')"
-                  style="width:100%; padding: var(--sp-2); background:transparent;
-                         border:1px dashed var(--color-border-default); border-radius:var(--radius-md);
-                         color:var(--color-text-disabled); font-family:var(--font-ui);
-                         font-size:var(--text-xs); font-weight:600; letter-spacing:0.05em;
-                         text-transform:uppercase; cursor:pointer; transition:all var(--transition-fast);"
-                  onmouseover="this.style.borderColor='var(--color-border-strong)'; this.style.color='var(--color-text-secondary)'"
-                  onmouseout="this.style.borderColor='var(--color-border-default)'; this.style.color='var(--color-text-disabled)'">
-            ⌨ Keyboard Shortcuts
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Circuit Simulator — tsk-102</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+      :root {
+        --color-bg-app: #080c14;
+        --color-bg-toolbar: #0d1117;
+        --color-bg-canvas: #0a0e1a;
+        --color-bg-panel: #0d1117;
+        --color-bg-card: #131b2e;
+        --color-bg-card-hover: #1a2744;
+        --color-bg-modal: #111827;
+        --color-bg-input: #0d1117;
+        --color-bg-tooltip: #1e293b;
+        --color-canvas-dot: rgba(96, 165, 250, 0.18);
+        --color-border-subtle: #1a2235;
+        --color-border-default: #1f2d45;
+        --color-border-strong: #2d4263;
+        --color-text-primary: #e8f0fe;
+        --color-text-secondary: #7e9cc4;
+        --color-text-disabled: #3b506e;
+        --color-accent: #4f8ef7;
+        --color-accent-dark: #2563eb;
+        --color-accent-light: #1d3461;
+        --color-accent-glow: rgba(79, 142, 247, 0.3);
+        --color-accent-glow-sm: rgba(79, 142, 247, 0.15);
+        --color-success: #22c55e;
+        --color-success-glow: rgba(34, 197, 94, 0.25);
+        --color-warning: #f59e0b;
+        --color-warning-glow: rgba(245, 158, 11, 0.25);
+        --color-danger: #ef4444;
+        --color-danger-glow: rgba(239, 68, 68, 0.25);
+        --color-comp-resistor: #60a5fa;
+        --color-comp-vsource: #f59e0b;
+        --color-comp-led: #22c55e;
+        --color-comp-switch: #94a3b8;
+        --color-comp-switch-on: #22c55e;
+        --color-comp-ground: #64748b;
+        --font-ui: "Syne", sans-serif;
+        --font-mono: "JetBrains Mono", monospace;
+        --text-2xs: 10px;
+        --text-xs: 11px;
+        --text-sm: 13px;
+        --text-base: 15px;
+        --text-lg: 17px;
+        --text-xl: 20px;
+        --sp-1: 4px;
+        --sp-2: 8px;
+        --sp-3: 12px;
+        --sp-4: 16px;
+        --sp-5: 20px;
+        --sp-6: 24px;
+        --sp-8: 32px;
+        --radius-xs: 3px;
+        --radius-sm: 5px;
+        --radius-md: 8px;
+        --radius-lg: 12px;
+        --radius-xl: 16px;
+        --radius-pill: 999px;
+        --shadow-sm: 0 1px 4px rgba(0, 0, 0, 0.5);
+        --shadow-md: 0 4px 14px rgba(0, 0, 0, 0.6);
+        --shadow-lg: 0 8px 28px rgba(0, 0, 0, 0.7);
+        --shadow-glow: 0 0 18px var(--color-accent-glow);
+        --shadow-glow-sm: 0 0 10px var(--color-accent-glow-sm);
+        --transition-fast: 0.12s ease;
+        --transition-base: 0.2s ease;
+        --transition-slow: 0.35s ease;
+        --toolbar-height: 52px;
+        --panel-width: 280px;
+      }
+      html,
+      body {
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: var(--color-bg-app);
+        color: var(--color-text-primary);
+        font-family: var(--font-ui);
+        -webkit-font-smoothing: antialiased;
+      }
+      .app-shell {
+        display: grid;
+        grid-template-rows: var(--toolbar-height) 1fr;
+        grid-template-columns: 1fr var(--panel-width);
+        grid-template-areas: "toolbar toolbar" "canvas panel";
+        width: 100vw;
+        height: 100vh;
+        overflow: hidden;
+      }
+      .toolbar {
+        grid-area: toolbar;
+        display: flex;
+        align-items: center;
+        gap: var(--sp-2);
+        padding: 0 var(--sp-4);
+        background: var(--color-bg-toolbar);
+        border-bottom: 1px solid var(--color-border-default);
+        box-shadow: 0 2px 12px rgba(0, 0, 0, 0.4);
+        position: relative;
+        z-index: 100;
+        user-select: none;
+      }
+      .toolbar-brand {
+        display: flex;
+        align-items: center;
+        gap: var(--sp-2);
+        margin-right: var(--sp-3);
+      }
+      .toolbar-brand-icon {
+        width: 28px;
+        height: 28px;
+        background: var(--color-accent);
+        border-radius: var(--radius-sm);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 15px;
+        box-shadow: var(--shadow-glow-sm);
+        flex-shrink: 0;
+      }
+      .toolbar-brand-name {
+        font-size: var(--text-base);
+        font-weight: 700;
+        letter-spacing: 0.04em;
+      }
+      .toolbar-brand-badge {
+        font-size: var(--text-2xs);
+        font-weight: 600;
+        letter-spacing: 0.08em;
+        color: var(--color-accent);
+        background: var(--color-accent-light);
+        border: 1px solid var(--color-accent);
+        border-radius: var(--radius-pill);
+        padding: 1px 6px;
+        text-transform: uppercase;
+      }
+      .toolbar-divider {
+        width: 1px;
+        height: 24px;
+        background: var(--color-border-default);
+        margin: 0 var(--sp-1);
+        flex-shrink: 0;
+      }
+      .tool-group {
+        display: flex;
+        align-items: center;
+        gap: var(--sp-1);
+        background: rgba(255, 255, 255, 0.03);
+        border: 1px solid var(--color-border-subtle);
+        border-radius: var(--radius-md);
+        padding: 3px;
+      }
+      .tool-btn {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 5px 10px;
+        border: none;
+        border-radius: var(--radius-sm);
+        background: transparent;
+        color: var(--color-text-secondary);
+        font-family: var(--font-ui);
+        font-size: var(--text-sm);
+        font-weight: 600;
+        letter-spacing: 0.02em;
+        cursor: pointer;
+        transition:
+          background var(--transition-fast),
+          color var(--transition-fast),
+          box-shadow var(--transition-fast);
+        white-space: nowrap;
+      }
+      .tool-btn:hover {
+        background: rgba(255, 255, 255, 0.06);
+        color: var(--color-text-primary);
+      }
+      .tool-btn[data-tool="select"].active {
+        background: var(--color-accent-light);
+        color: var(--color-accent);
+        box-shadow: inset 0 0 0 1px var(--color-accent);
+      }
+      .tool-btn[data-tool="wire"].active {
+        background: rgba(52, 211, 153, 0.12);
+        color: var(--color-success);
+        box-shadow: inset 0 0 0 1px var(--color-success);
+      }
+      .tool-btn[data-tool="ground"].active {
+        background: rgba(148, 163, 184, 0.12);
+        color: var(--color-comp-ground);
+        box-shadow: inset 0 0 0 1px var(--color-comp-ground);
+      }
+      .tool-btn svg {
+        width: 14px;
+        height: 14px;
+        stroke: currentColor;
+        fill: none;
+        stroke-width: 2;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        flex-shrink: 0;
+      }
+      .wire-colors {
+        display: flex;
+        align-items: center;
+        gap: var(--sp-1);
+      }
+      .wire-color-label {
+        font-size: var(--text-xs);
+        font-weight: 600;
+        color: var(--color-text-disabled);
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+        margin-right: 2px;
+      }
+      .color-swatch {
+        width: 18px;
+        height: 18px;
+        border-radius: var(--radius-pill);
+        border: 2px solid transparent;
+        cursor: pointer;
+        transition:
+          transform var(--transition-fast),
+          border-color var(--transition-fast),
+          box-shadow var(--transition-fast);
+      }
+      .color-swatch:hover {
+        transform: scale(1.2);
+      }
+      .color-swatch.active {
+        border-color: #fff;
+        box-shadow: 0 0 8px currentColor;
+        transform: scale(1.15);
+      }
+      .toolbar-spacer {
+        flex: 1;
+      }
+      .zoom-group {
+        display: flex;
+        align-items: center;
+        gap: 2px;
+        background: rgba(255, 255, 255, 0.03);
+        border: 1px solid var(--color-border-subtle);
+        border-radius: var(--radius-md);
+        padding: 3px;
+      }
+      .zoom-btn {
+        width: 28px;
+        height: 28px;
+        border: none;
+        border-radius: var(--radius-xs);
+        background: transparent;
+        color: var(--color-text-secondary);
+        font-family: var(--font-ui);
+        font-size: var(--text-lg);
+        font-weight: 700;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition:
+          background var(--transition-fast),
+          color var(--transition-fast);
+      }
+      .zoom-btn:hover {
+        background: rgba(255, 255, 255, 0.07);
+        color: var(--color-text-primary);
+      }
+      .zoom-level {
+        font-family: var(--font-mono);
+        font-size: var(--text-xs);
+        font-weight: 500;
+        color: var(--color-text-secondary);
+        min-width: 38px;
+        text-align: center;
+      }
+      .btn-clear {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 12px;
+        border: 1px solid var(--color-border-default);
+        border-radius: var(--radius-sm);
+        background: transparent;
+        color: var(--color-text-secondary);
+        font-family: var(--font-ui);
+        font-size: var(--text-sm);
+        font-weight: 600;
+        cursor: pointer;
+        transition:
+          border-color var(--transition-fast),
+          color var(--transition-fast),
+          background var(--transition-fast);
+      }
+      .btn-clear:hover {
+        border-color: var(--color-danger);
+        color: var(--color-danger);
+        background: rgba(239, 68, 68, 0.08);
+      }
+      .btn-simulate {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 7px 18px;
+        border: none;
+        border-radius: var(--radius-sm);
+        background: var(--color-accent);
+        color: #fff;
+        font-family: var(--font-ui);
+        font-size: var(--text-sm);
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        cursor: pointer;
+        transition:
+          background var(--transition-fast),
+          box-shadow var(--transition-fast),
+          transform var(--transition-fast);
+        position: relative;
+        overflow: hidden;
+      }
+      .btn-simulate::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background: linear-gradient(
+          90deg,
+          transparent 0%,
+          rgba(255, 255, 255, 0.15) 50%,
+          transparent 100%
+        );
+        transform: translateX(-100%);
+        transition: transform 0.5s ease;
+      }
+      .btn-simulate:hover {
+        background: var(--color-accent-dark);
+        box-shadow: var(--shadow-glow);
+        transform: translateY(-1px);
+      }
+      .btn-simulate:hover::before {
+        transform: translateX(100%);
+      }
+      .btn-simulate.running {
+        background: var(--color-accent-dark);
+        animation: sim-pulse 1.2s ease-in-out infinite alternate;
+      }
+      .btn-simulate.has-results {
+        background: var(--color-success);
+      }
+      .btn-simulate svg {
+        width: 14px;
+        height: 14px;
+        stroke: currentColor;
+        fill: none;
+        stroke-width: 2.5;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        flex-shrink: 0;
+      }
+      @keyframes sim-pulse {
+        from {
+          box-shadow: 0 0 8px var(--color-accent-glow);
+        }
+        to {
+          box-shadow: 0 0 24px var(--color-accent-glow);
+        }
+      }
+      .canvas-wrap {
+        grid-area: canvas;
+        position: relative;
+        overflow: hidden;
+        background: var(--color-bg-canvas);
+        box-shadow: inset 0 0 60px rgba(0, 0, 0, 0.3);
+      }
+      #circuit-canvas {
+        display: block;
+        width: 100%;
+        height: 100%;
+        cursor: default;
+      }
+      .canvas-wrap[data-mode="wire"] #circuit-canvas {
+        cursor: crosshair;
+      }
+      .canvas-wrap[data-mode="pan"] #circuit-canvas {
+        cursor: grabbing;
+      }
+      .canvas-coords {
+        position: absolute;
+        bottom: var(--sp-3);
+        left: var(--sp-4);
+        font-family: var(--font-mono);
+        font-size: var(--text-xs);
+        color: var(--color-text-disabled);
+        pointer-events: none;
+        user-select: none;
+      }
+      .canvas-status {
+        position: absolute;
+        top: var(--sp-4);
+        left: var(--sp-4);
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-family: var(--font-ui);
+        font-size: var(--text-xs);
+        font-weight: 600;
+        color: var(--color-text-secondary);
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+        background: rgba(13, 17, 23, 0.8);
+        border: 1px solid var(--color-border-subtle);
+        border-radius: var(--radius-pill);
+        padding: 4px 10px;
+        backdrop-filter: blur(6px);
+        pointer-events: none;
+        user-select: none;
+      }
+      .canvas-status-dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: var(--color-text-disabled);
+        flex-shrink: 0;
+      }
+      .canvas-status-dot.ready {
+        background: var(--color-success);
+        box-shadow: 0 0 6px var(--color-success-glow);
+      }
+      .canvas-status-dot.active {
+        background: var(--color-warning);
+        box-shadow: 0 0 6px var(--color-warning-glow);
+        animation: blink 1s infinite;
+      }
+      .canvas-status-dot.error {
+        background: var(--color-danger);
+        box-shadow: 0 0 6px var(--color-danger-glow);
+      }
+      @keyframes blink {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.3;
+        }
+      }
+      .toast-container {
+        position: absolute;
+        bottom: var(--sp-6);
+        left: 50%;
+        transform: translateX(-50%);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: var(--sp-2);
+        pointer-events: none;
+        z-index: 200;
+      }
+      .toast {
+        display: flex;
+        align-items: center;
+        gap: var(--sp-3);
+        padding: var(--sp-3) var(--sp-5);
+        background: var(--color-bg-modal);
+        border: 1px solid var(--color-border-default);
+        border-left: 4px solid var(--color-accent);
+        border-radius: var(--radius-md);
+        box-shadow: var(--shadow-lg);
+        font-family: var(--font-ui);
+        font-size: var(--text-sm);
+        font-weight: 500;
+        color: var(--color-text-primary);
+        white-space: nowrap;
+        backdrop-filter: blur(10px);
+        opacity: 0;
+        transform: translateY(16px);
+        transition:
+          opacity var(--transition-base),
+          transform var(--transition-base);
+      }
+      .toast.visible {
+        opacity: 1;
+        transform: translateY(0);
+      }
+      .toast.success {
+        border-left-color: var(--color-success);
+      }
+      .toast.warning {
+        border-left-color: var(--color-warning);
+      }
+      .toast.error {
+        border-left-color: var(--color-danger);
+      }
+      .panel {
+        grid-area: panel;
+        display: flex;
+        flex-direction: column;
+        background: var(--color-bg-panel);
+        border-left: 1px solid var(--color-border-strong);
+        overflow: hidden;
+        z-index: 50;
+      }
+      .panel-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: var(--sp-3) var(--sp-4);
+        border-bottom: 1px solid var(--color-border-subtle);
+        flex-shrink: 0;
+      }
+      .panel-title {
+        font-size: var(--text-sm);
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--color-text-secondary);
+      }
+      .panel-component-count {
+        font-family: var(--font-mono);
+        font-size: var(--text-xs);
+        color: var(--color-text-disabled);
+        background: rgba(255, 255, 255, 0.05);
+        border: 1px solid var(--color-border-subtle);
+        border-radius: var(--radius-pill);
+        padding: 1px 8px;
+      }
+      .panel-body {
+        flex: 1;
+        overflow-y: auto;
+        overflow-x: hidden;
+        padding: var(--sp-3);
+        display: flex;
+        flex-direction: column;
+        gap: var(--sp-4);
+      }
+      .panel-body::-webkit-scrollbar {
+        width: 4px;
+      }
+      .panel-body::-webkit-scrollbar-track {
+        background: transparent;
+      }
+      .panel-body::-webkit-scrollbar-thumb {
+        background: var(--color-border-default);
+        border-radius: var(--radius-pill);
+      }
+      .component-section {
+        display: flex;
+        flex-direction: column;
+        gap: var(--sp-2);
+      }
+      .component-section-title {
+        font-size: var(--text-2xs);
+        font-weight: 700;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: var(--color-text-disabled);
+        padding: 0 var(--sp-1);
+        margin-bottom: 2px;
+      }
+      .component-card {
+        display: flex;
+        align-items: center;
+        gap: var(--sp-3);
+        padding: var(--sp-3);
+        background: var(--color-bg-card);
+        border: 1px solid var(--color-border-subtle);
+        border-radius: var(--radius-md);
+        cursor: grab;
+        user-select: none;
+        transition:
+          background var(--transition-fast),
+          border-color var(--transition-fast),
+          transform var(--transition-fast),
+          box-shadow var(--transition-fast);
+        position: relative;
+        overflow: hidden;
+      }
+      .component-card::before {
+        content: "";
+        position: absolute;
+        left: 0;
+        top: 0;
+        bottom: 0;
+        width: 3px;
+        background: var(--card-accent, var(--color-accent));
+        border-radius: var(--radius-pill) 0 0 var(--radius-pill);
+        opacity: 0;
+        transition: opacity var(--transition-fast);
+      }
+      .component-card:hover {
+        background: var(--color-bg-card-hover);
+        border-color: var(--card-accent, var(--color-accent));
+        transform: translateX(3px);
+        box-shadow: var(--shadow-sm);
+      }
+      .component-card:hover::before {
+        opacity: 1;
+      }
+      .component-card:active {
+        cursor: grabbing;
+        transform: scale(0.97);
+      }
+      .card-icon {
+        width: 40px;
+        height: 32px;
+        flex-shrink: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .card-icon svg {
+        width: 38px;
+        height: 28px;
+        overflow: visible;
+      }
+      .card-info {
+        flex: 1;
+        min-width: 0;
+      }
+      .card-name {
+        font-size: var(--text-sm);
+        font-weight: 600;
+        color: var(--color-text-primary);
+      }
+      .card-default {
+        font-family: var(--font-mono);
+        font-size: var(--text-xs);
+        color: var(--color-text-secondary);
+        margin-top: 2px;
+      }
+      .card-handle {
+        color: var(--color-text-disabled);
+        font-size: 14px;
+        opacity: 0;
+        transition: opacity var(--transition-fast);
+      }
+      .component-card:hover .card-handle {
+        opacity: 1;
+      }
+      .properties-panel {
+        border-top: 1px solid var(--color-border-default);
+        background: var(--color-bg-app);
+        flex-shrink: 0;
+        max-height: 0;
+        overflow: hidden;
+        transition: max-height var(--transition-slow);
+      }
+      .properties-panel.open {
+        max-height: 240px;
+      }
+      .properties-inner {
+        padding: var(--sp-4);
+        display: flex;
+        flex-direction: column;
+        gap: var(--sp-3);
+      }
+      .properties-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+      .properties-title {
+        font-size: var(--text-sm);
+        font-weight: 700;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--color-text-secondary);
+      }
+      .properties-id {
+        font-family: var(--font-mono);
+        font-size: var(--text-xs);
+        color: var(--color-text-disabled);
+      }
+      .property-row {
+        display: flex;
+        align-items: center;
+        gap: var(--sp-3);
+      }
+      .property-label {
+        font-size: var(--text-xs);
+        font-weight: 600;
+        color: var(--color-text-secondary);
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        width: 64px;
+        flex-shrink: 0;
+      }
+      .property-input {
+        flex: 1;
+        padding: 6px 10px;
+        background: var(--color-bg-input);
+        border: 1px solid var(--color-border-default);
+        border-radius: var(--radius-sm);
+        color: var(--color-text-primary);
+        font-family: var(--font-mono);
+        font-size: var(--text-sm);
+        font-weight: 500;
+        outline: none;
+        transition:
+          border-color var(--transition-fast),
+          box-shadow var(--transition-fast);
+      }
+      .property-input:focus {
+        border-color: var(--color-accent);
+        box-shadow: 0 0 0 3px var(--color-accent-glow-sm);
+      }
+      .property-unit {
+        font-family: var(--font-mono);
+        font-size: var(--text-xs);
+        font-weight: 500;
+        color: var(--color-text-disabled);
+        width: 24px;
+        flex-shrink: 0;
+      }
+      .property-actions {
+        display: flex;
+        gap: var(--sp-2);
+      }
+      .prop-btn {
+        flex: 1;
+        padding: 6px;
+        border-radius: var(--radius-sm);
+        border: 1px solid var(--color-border-default);
+        background: transparent;
+        color: var(--color-text-secondary);
+        font-family: var(--font-ui);
+        font-size: var(--text-xs);
+        font-weight: 600;
+        letter-spacing: 0.04em;
+        cursor: pointer;
+        transition: all var(--transition-fast);
+        text-align: center;
+      }
+      .prop-btn:hover {
+        background: rgba(255, 255, 255, 0.06);
+        color: var(--color-text-primary);
+      }
+      .prop-btn.rotate:hover {
+        border-color: var(--color-accent);
+        color: var(--color-accent);
+      }
+      .prop-btn.delete:hover {
+        border-color: var(--color-danger);
+        color: var(--color-danger);
+        background: rgba(239, 68, 68, 0.08);
+      }
+      #drag-ghost {
+        position: fixed;
+        pointer-events: none;
+        z-index: 999;
+        display: none;
+        transform: translate(-50%, -50%);
+      }
+      .shortcuts-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.7);
+        backdrop-filter: blur(6px);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 1000;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity var(--transition-base);
+      }
+      .shortcuts-overlay.open {
+        opacity: 1;
+        pointer-events: all;
+      }
+      .shortcuts-card {
+        background: var(--color-bg-modal);
+        border: 1px solid var(--color-border-strong);
+        border-radius: var(--radius-xl);
+        padding: var(--sp-8);
+        min-width: 360px;
+        box-shadow: var(--shadow-lg);
+      }
+      .shortcuts-heading {
+        font-size: 20px;
+        font-weight: 800;
+        color: var(--color-text-primary);
+        margin-bottom: var(--sp-6);
+      }
+      .shortcut-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: var(--sp-2) 0;
+        border-bottom: 1px solid var(--color-border-subtle);
+      }
+      .shortcut-row:last-child {
+        border-bottom: none;
+      }
+      .shortcut-desc {
+        font-size: var(--text-sm);
+        color: var(--color-text-secondary);
+      }
+      .shortcut-keys {
+        display: flex;
+        gap: 4px;
+      }
+      .key {
+        font-family: var(--font-mono);
+        font-size: var(--text-xs);
+        font-weight: 600;
+        padding: 2px 8px;
+        background: rgba(255, 255, 255, 0.07);
+        border: 1px solid var(--color-border-default);
+        border-bottom: 2px solid var(--color-border-strong);
+        border-radius: var(--radius-xs);
+        color: var(--color-text-primary);
+      }
+      .modal-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.65);
+        backdrop-filter: blur(4px);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 900;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity var(--transition-base);
+      }
+      .modal-overlay.open {
+        opacity: 1;
+        pointer-events: all;
+      }
+      .modal-card {
+        background: var(--color-bg-modal);
+        border: 1px solid var(--color-border-strong);
+        border-radius: var(--radius-xl);
+        padding: var(--sp-8);
+        max-width: 360px;
+        width: 100%;
+        box-shadow: var(--shadow-lg);
+        transform: translateY(12px);
+        transition: transform var(--transition-base);
+      }
+      .modal-overlay.open .modal-card {
+        transform: translateY(0);
+      }
+      .modal-icon {
+        font-size: 32px;
+        margin-bottom: var(--sp-4);
+      }
+      .modal-title {
+        font-size: 24px;
+        font-weight: 800;
+        color: var(--color-text-primary);
+        margin-bottom: var(--sp-2);
+      }
+      .modal-body {
+        font-size: var(--text-sm);
+        color: var(--color-text-secondary);
+        line-height: 1.6;
+        margin-bottom: var(--sp-6);
+      }
+      .modal-actions {
+        display: flex;
+        gap: var(--sp-3);
+        justify-content: flex-end;
+      }
+      .modal-btn {
+        padding: 8px 20px;
+        border-radius: var(--radius-sm);
+        font-family: var(--font-ui);
+        font-size: var(--text-sm);
+        font-weight: 700;
+        cursor: pointer;
+        transition: all var(--transition-fast);
+      }
+      .modal-btn.cancel {
+        border: 1px solid var(--color-border-default);
+        background: transparent;
+        color: var(--color-text-secondary);
+      }
+      .modal-btn.cancel:hover {
+        border-color: var(--color-text-secondary);
+        color: var(--color-text-primary);
+      }
+      .modal-btn.confirm {
+        border: none;
+        background: var(--color-danger);
+        color: #fff;
+      }
+      .modal-btn.confirm:hover {
+        background: #dc2626;
+        box-shadow: 0 0 16px var(--color-danger-glow);
+      }
+      .tooltip {
+        position: fixed;
+        z-index: 500;
+        padding: var(--sp-2) var(--sp-3);
+        background: var(--color-bg-tooltip);
+        border: 1px solid var(--color-border-default);
+        border-radius: var(--radius-sm);
+        font-family: var(--font-ui);
+        font-size: var(--text-xs);
+        font-weight: 500;
+        color: var(--color-text-primary);
+        box-shadow: var(--shadow-md);
+        pointer-events: none;
+        opacity: 0;
+        transform: translateY(4px);
+        transition:
+          opacity 0.15s,
+          transform 0.15s;
+        max-width: 220px;
+        line-height: 1.5;
+      }
+      .tooltip.visible {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="toolbar">
+        <div class="toolbar-brand">
+          <div class="toolbar-brand-icon">&#9889;</div>
+          <span class="toolbar-brand-name">CircuitSim</span>
+          <span class="toolbar-brand-badge">MVP</span>
+        </div>
+        <div class="toolbar-divider"></div>
+        <div class="tool-group">
+          <button
+            class="tool-btn active"
+            data-tool="select"
+            title="Select (S)"
+            aria-pressed="true"
+          >
+            <svg viewBox="0 0 16 16">
+              <path d="M3 2l10 5.5-5.5 1L5 14 3 2z" /></svg
+            >Select
+          </button>
+          <button
+            class="tool-btn"
+            data-tool="wire"
+            title="Wire (W)"
+            aria-pressed="false"
+          >
+            <svg viewBox="0 0 16 16">
+              <path d="M2 8h4M10 8h4M6 8a2 2 0 0 0 4 0 2 2 0 0 0-4 0z" /></svg
+            >Wire
+          </button>
+          <button
+            class="tool-btn"
+            data-tool="ground"
+            title="Ground (G)"
+            aria-pressed="false"
+          >
+            <svg viewBox="0 0 16 16">
+              <path d="M8 2v8M4 10h8M5.5 12.5h5M7 15h2" /></svg
+            >Ground
           </button>
         </div>
+        <div class="toolbar-divider"></div>
+        <div class="wire-colors">
+          <span class="wire-color-label">Wire</span>
+          <button
+            class="color-swatch active"
+            style="background: #60a5fa"
+            data-color="#60A5FA"
+            title="Blue"
+          ></button>
+          <button
+            class="color-swatch"
+            style="background: #34d399"
+            data-color="#34D399"
+            title="Green"
+          ></button>
+          <button
+            class="color-swatch"
+            style="background: #f87171"
+            data-color="#F87171"
+            title="Red"
+          ></button>
+          <button
+            class="color-swatch"
+            style="background: #fbbf24"
+            data-color="#FBBF24"
+            title="Yellow"
+          ></button>
+          <button
+            class="color-swatch"
+            style="background: #e2e8f0"
+            data-color="#E2E8F0"
+            title="White"
+          ></button>
+        </div>
+        <div class="toolbar-spacer"></div>
+        <div class="zoom-group">
+          <button class="zoom-btn" id="btn-zoom-out">&#8722;</button>
+          <span class="zoom-level" id="zoom-display">100%</span>
+          <button class="zoom-btn" id="btn-zoom-in">+</button>
+        </div>
+        <div class="toolbar-divider"></div>
+        <button class="btn-clear" id="btn-clear">
+          <svg
+            width="13"
+            height="13"
+            viewBox="0 0 16 16"
+            stroke="currentColor"
+            fill="none"
+            stroke-width="2"
+            stroke-linecap="round"
+          >
+            <path d="M3 3l10 10M13 3L3 13" /></svg
+          >Clear
+        </button>
+        <button class="btn-simulate" id="btn-simulate">
+          <svg viewBox="0 0 16 16">
+            <polygon points="4,2 14,8 4,14" fill="currentColor" stroke="none" />
+          </svg>
+          <span id="simulate-label">Simulate</span>
+        </button>
+      </header>
 
-      </div><!-- /panel-body -->
+      <main class="canvas-wrap" id="canvas-wrap" data-mode="select">
+        <canvas id="circuit-canvas"></canvas>
+        <div class="canvas-status">
+          <span class="canvas-status-dot ready" id="status-dot"></span>
+          <span id="status-text">Ready</span>
+        </div>
+        <div class="canvas-coords" id="canvas-coords">x: 0 &nbsp; y: 0</div>
+        <div class="toast-container" id="toast-container"></div>
+      </main>
 
-      <!-- Properties panel — slides up when a component is selected -->
-      <div class="properties-panel" id="properties-panel">
-        <div class="properties-inner">
-          <div class="properties-header">
-            <span class="properties-title">Properties</span>
-            <span class="properties-id" id="prop-id">—</span>
+      <aside class="panel">
+        <div class="panel-header">
+          <span class="panel-title">Components</span>
+          <span class="panel-component-count" id="canvas-component-count"
+            >0 on canvas</span
+          >
+        </div>
+        <div class="panel-body">
+          <div class="component-section">
+            <div class="component-section-title">Passive</div>
+            <div
+              class="component-card"
+              draggable="true"
+              data-type="RESISTOR"
+              style="--card-accent: var(--color-comp-resistor)"
+              tabindex="0"
+              role="button"
+              aria-label="Resistor"
+            >
+              <div class="card-icon">
+                <svg
+                  viewBox="-22 -10 44 20"
+                  stroke="var(--color-comp-resistor)"
+                  fill="none"
+                  stroke-width="1.8"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <line x1="-20" y1="0" x2="-12" y2="0" />
+                  <polyline
+                    points="-12,0 -9,-6 -6,6 -3,-6 0,6 3,-6 6,6 9,-6 12,0"
+                  />
+                  <line x1="12" y1="0" x2="20" y2="0" />
+                  <circle
+                    cx="-20"
+                    cy="0"
+                    r="1.5"
+                    fill="var(--color-comp-resistor)"
+                  />
+                  <circle
+                    cx="20"
+                    cy="0"
+                    r="1.5"
+                    fill="var(--color-comp-resistor)"
+                  />
+                </svg>
+              </div>
+              <div class="card-info">
+                <div class="card-name">Resistor</div>
+                <div class="card-default">1000 &#937;</div>
+              </div>
+              <span class="card-handle">&#10815;</span>
+            </div>
           </div>
-          <div class="property-row">
-            <span class="property-label" id="prop-label">Value</span>
-            <input class="property-input" id="prop-input" type="number" min="0" step="1" value="1000" aria-label="Component value" />
-            <span class="property-unit" id="prop-unit">Ω</span>
+          <div class="component-section">
+            <div class="component-section-title">Sources</div>
+            <div
+              class="component-card"
+              draggable="true"
+              data-type="VOLTAGE_SOURCE"
+              style="--card-accent: var(--color-comp-vsource)"
+              tabindex="0"
+              role="button"
+              aria-label="Voltage Source"
+            >
+              <div class="card-icon">
+                <svg
+                  viewBox="-22 -12 44 24"
+                  stroke="var(--color-comp-vsource)"
+                  fill="none"
+                  stroke-width="1.8"
+                  stroke-linecap="round"
+                >
+                  <line x1="-20" y1="0" x2="-10" y2="0" />
+                  <circle cx="0" cy="0" r="10" />
+                  <line x1="0" y1="-5" x2="0" y2="5" />
+                  <line x1="-4" y1="0" x2="4" y2="0" stroke-width="2.5" />
+                  <text
+                    x="4"
+                    y="-2"
+                    fill="var(--color-comp-vsource)"
+                    stroke="none"
+                    font-size="5"
+                    font-family="Syne,sans-serif"
+                    font-weight="700"
+                  >
+                    +
+                  </text>
+                  <line x1="10" y1="0" x2="20" y2="0" />
+                  <circle
+                    cx="-20"
+                    cy="0"
+                    r="1.5"
+                    fill="var(--color-comp-vsource)"
+                  />
+                  <circle
+                    cx="20"
+                    cy="0"
+                    r="1.5"
+                    fill="var(--color-comp-vsource)"
+                  />
+                </svg>
+              </div>
+              <div class="card-info">
+                <div class="card-name">Voltage Source</div>
+                <div class="card-default">9 V</div>
+              </div>
+              <span class="card-handle">&#10815;</span>
+            </div>
           </div>
-          <div class="property-actions">
-            <button class="prop-btn rotate" id="prop-rotate">↻ Rotate</button>
-            <button class="prop-btn delete" id="prop-delete">✕ Delete</button>
+          <div class="component-section">
+            <div class="component-section-title">Output</div>
+            <div
+              class="component-card"
+              draggable="true"
+              data-type="LED"
+              style="--card-accent: var(--color-comp-led)"
+              tabindex="0"
+              role="button"
+              aria-label="LED"
+            >
+              <div class="card-icon">
+                <svg
+                  viewBox="-22 -12 44 24"
+                  stroke="var(--color-comp-led)"
+                  fill="none"
+                  stroke-width="1.8"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <line x1="-20" y1="0" x2="-8" y2="0" />
+                  <polygon
+                    points="-8,-8 -8,8 8,0"
+                    fill="rgba(34,197,94,0.20)"
+                    stroke="var(--color-comp-led)"
+                    stroke-width="1.8"
+                  />
+                  <line x1="8" y1="-8" x2="8" y2="8" />
+                  <line x1="8" y1="0" x2="20" y2="0" />
+                  <line x1="12" y1="-6" x2="17" y2="-11" stroke-width="1.2" />
+                  <line x1="16" y1="-3" x2="21" y2="-8" stroke-width="1.2" />
+                  <circle
+                    cx="-20"
+                    cy="0"
+                    r="1.5"
+                    fill="var(--color-comp-led)"
+                  />
+                  <circle cx="20" cy="0" r="1.5" fill="var(--color-comp-led)" />
+                </svg>
+              </div>
+              <div class="card-info">
+                <div class="card-name">LED</div>
+                <div class="card-default">Vf = 2.0 V</div>
+              </div>
+              <span class="card-handle">&#10815;</span>
+            </div>
+            <div
+              class="component-card"
+              draggable="true"
+              data-type="SWITCH"
+              style="--card-accent: var(--color-comp-switch)"
+              tabindex="0"
+              role="button"
+              aria-label="Switch"
+            >
+              <div class="card-icon">
+                <svg
+                  viewBox="-22 -12 44 24"
+                  stroke="var(--color-comp-switch)"
+                  fill="none"
+                  stroke-width="1.8"
+                  stroke-linecap="round"
+                >
+                  <line x1="-20" y1="0" x2="-8" y2="0" />
+                  <circle
+                    cx="-8"
+                    cy="0"
+                    r="1.8"
+                    fill="var(--color-comp-switch)"
+                  />
+                  <line x1="-8" y1="0" x2="8" y2="-8" />
+                  <circle
+                    cx="8"
+                    cy="0"
+                    r="1.8"
+                    fill="var(--color-comp-switch)"
+                  />
+                  <line x1="8" y1="0" x2="20" y2="0" />
+                  <circle
+                    cx="-20"
+                    cy="0"
+                    r="1.5"
+                    fill="var(--color-comp-switch)"
+                  />
+                  <circle
+                    cx="20"
+                    cy="0"
+                    r="1.5"
+                    fill="var(--color-comp-switch)"
+                  />
+                </svg>
+              </div>
+              <div class="card-info">
+                <div class="card-name">Switch</div>
+                <div class="card-default">Normally open</div>
+              </div>
+              <span class="card-handle">&#10815;</span>
+            </div>
+          </div>
+          <div style="margin-top: auto; padding-top: var(--sp-4)">
+            <button
+              onclick="
+                document
+                  .getElementById('shortcuts-overlay')
+                  .classList.add('open')
+              "
+              style="
+                width: 100%;
+                padding: var(--sp-2);
+                background: transparent;
+                border: 1px dashed var(--color-border-default);
+                border-radius: var(--radius-md);
+                color: var(--color-text-disabled);
+                font-family: var(--font-ui);
+                font-size: var(--text-xs);
+                font-weight: 600;
+                letter-spacing: 0.05em;
+                text-transform: uppercase;
+                cursor: pointer;
+                transition: all var(--transition-fast);
+              "
+              onmouseover="
+                this.style.borderColor = 'var(--color-border-strong)';
+                this.style.color = 'var(--color-text-secondary)';
+              "
+              onmouseout="
+                this.style.borderColor = 'var(--color-border-default)';
+                this.style.color = 'var(--color-text-disabled)';
+              "
+            >
+              &#9000; Keyboard Shortcuts
+            </button>
           </div>
         </div>
-      </div>
+        <div class="properties-panel" id="properties-panel">
+          <div class="properties-inner">
+            <div class="properties-header">
+              <span class="properties-title">Properties</span>
+              <span class="properties-id" id="prop-id">&#8212;</span>
+            </div>
+            <div class="property-row">
+              <span class="property-label" id="prop-label">Value</span>
+              <input
+                class="property-input"
+                id="prop-input"
+                type="number"
+                min="0"
+                step="1"
+                value="1000"
+              />
+              <span class="property-unit" id="prop-unit">&#937;</span>
+            </div>
+            <div class="property-actions">
+              <button class="prop-btn rotate" id="prop-rotate">
+                &#10227; Rotate
+              </button>
+              <button class="prop-btn delete" id="prop-delete">
+                &#10005; Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      </aside>
+    </div>
 
-    </aside><!-- /panel -->
+    <canvas id="drag-ghost" width="140" height="80"></canvas>
 
-  </div><!-- /app-shell -->
-
-
-  <!-- ═══════════════════════════════════════════════
-       KEYBOARD SHORTCUTS OVERLAY
-  ════════════════════════════════════════════════ -->
-  <div class="shortcuts-overlay" id="shortcuts-overlay" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts">
-    <div class="shortcuts-card">
-      <div class="shortcuts-heading">Keyboard Shortcuts</div>
-      <div class="shortcut-row">
-        <span class="shortcut-desc">Select tool</span>
-        <div class="shortcut-keys"><span class="key">S</span></div>
-      </div>
-      <div class="shortcut-row">
-        <span class="shortcut-desc">Wire tool</span>
-        <div class="shortcut-keys"><span class="key">W</span></div>
-      </div>
-      <div class="shortcut-row">
-        <span class="shortcut-desc">Ground tool</span>
-        <div class="shortcut-keys"><span class="key">G</span></div>
-      </div>
-      <div class="shortcut-row">
-        <span class="shortcut-desc">Rotate selected</span>
-        <div class="shortcut-keys"><span class="key">R</span></div>
-      </div>
-      <div class="shortcut-row">
-        <span class="shortcut-desc">Delete selected</span>
-        <div class="shortcut-keys"><span class="key">Del</span></div>
-      </div>
-      <div class="shortcut-row">
-        <span class="shortcut-desc">Undo</span>
-        <div class="shortcut-keys"><span class="key">Ctrl</span><span class="key">Z</span></div>
-      </div>
-      <div class="shortcut-row">
-        <span class="shortcut-desc">Pan canvas</span>
-        <div class="shortcut-keys"><span class="key">Space</span><span class="key">Drag</span></div>
-      </div>
-      <div class="shortcut-row">
-        <span class="shortcut-desc">Zoom</span>
-        <div class="shortcut-keys"><span class="key">Scroll</span></div>
-      </div>
-      <div style="margin-top:20px; text-align:right;">
-        <button onclick="document.getElementById('shortcuts-overlay').classList.remove('open')"
-                style="padding:8px 20px; background:var(--color-accent); border:none;
-                       border-radius:var(--radius-sm); color:#fff; font-family:var(--font-ui);
-                       font-size:var(--text-sm); font-weight:700; cursor:pointer;">
-          Close
-        </button>
+    <div class="shortcuts-overlay" id="shortcuts-overlay">
+      <div class="shortcuts-card">
+        <div class="shortcuts-heading">Keyboard Shortcuts</div>
+        <div class="shortcut-row">
+          <span class="shortcut-desc">Select tool</span>
+          <div class="shortcut-keys"><span class="key">S</span></div>
+        </div>
+        <div class="shortcut-row">
+          <span class="shortcut-desc">Wire tool</span>
+          <div class="shortcut-keys"><span class="key">W</span></div>
+        </div>
+        <div class="shortcut-row">
+          <span class="shortcut-desc">Ground tool</span>
+          <div class="shortcut-keys"><span class="key">G</span></div>
+        </div>
+        <div class="shortcut-row">
+          <span class="shortcut-desc">Rotate selected</span>
+          <div class="shortcut-keys"><span class="key">R</span></div>
+        </div>
+        <div class="shortcut-row">
+          <span class="shortcut-desc">Delete selected</span>
+          <div class="shortcut-keys"><span class="key">Del</span></div>
+        </div>
+        <div class="shortcut-row">
+          <span class="shortcut-desc">Toggle switch</span>
+          <div class="shortcut-keys"><span class="key">Dbl-click</span></div>
+        </div>
+        <div class="shortcut-row">
+          <span class="shortcut-desc">Undo</span>
+          <div class="shortcut-keys">
+            <span class="key">Ctrl</span><span class="key">Z</span>
+          </div>
+        </div>
+        <div class="shortcut-row">
+          <span class="shortcut-desc">Pan canvas</span>
+          <div class="shortcut-keys">
+            <span class="key">Space</span><span class="key">+Drag</span>
+          </div>
+        </div>
+        <div class="shortcut-row">
+          <span class="shortcut-desc">Zoom</span>
+          <div class="shortcut-keys"><span class="key">Scroll</span></div>
+        </div>
+        <div style="margin-top: 20px; text-align: right">
+          <button
+            onclick="
+              document
+                .getElementById('shortcuts-overlay')
+                .classList.remove('open')
+            "
+            style="
+              padding: 8px 20px;
+              background: var(--color-accent);
+              border: none;
+              border-radius: var(--radius-sm);
+              color: #fff;
+              font-family: var(--font-ui);
+              font-size: var(--text-sm);
+              font-weight: 700;
+              cursor: pointer;
+            "
+          >
+            Close
+          </button>
+        </div>
       </div>
     </div>
-  </div>
 
-  <!-- Close shortcuts overlay on backdrop click -->
-  <script>
-    document.getElementById('shortcuts-overlay').addEventListener('click', function(e) {
-      if (e.target === this) this.classList.remove('open');
-    });
-  </script>
-
-
-  <!-- ═══════════════════════════════════════════════
-       CLEAR CANVAS CONFIRMATION MODAL
-  ════════════════════════════════════════════════ -->
-  <div class="modal-overlay" id="clear-modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
-    <div class="modal-card">
-      <div class="modal-icon">🗑️</div>
-      <div class="modal-title" id="modal-title">Clear Canvas?</div>
-      <div class="modal-body">
-        This will remove all components and wires from the canvas.
-        This action cannot be undone.
-      </div>
-      <div class="modal-actions">
-        <button class="modal-btn cancel" id="modal-cancel">Cancel</button>
-        <button class="modal-btn confirm" id="modal-confirm">Clear Everything</button>
+    <div class="modal-overlay" id="clear-modal">
+      <div class="modal-card">
+        <div class="modal-icon">&#128465;&#65039;</div>
+        <div class="modal-title">Clear Canvas?</div>
+        <div class="modal-body">
+          This will remove all components and wires. This action cannot be
+          undone.
+        </div>
+        <div class="modal-actions">
+          <button class="modal-btn cancel" id="modal-cancel">Cancel</button>
+          <button class="modal-btn confirm" id="modal-confirm">
+            Clear Everything
+          </button>
+        </div>
       </div>
     </div>
-  </div>
 
+    <div class="tooltip" id="tooltip"></div>
 
-  <!-- ═══════════════════════════════════════════════
-       TOOLTIP (positioned by JS)
-  ════════════════════════════════════════════════ -->
-  <div class="tooltip" id="tooltip" role="tooltip"></div>
+    <script>
+      // ═══════════════════════════════════════════════════════════
+      // tsk-102: COMPONENT SYSTEM
+      // Adds to tsk-101 (grid/zoom/pan/toolbar):
+      //   Module 1  — Canvas & coordinate helpers (carried from tsk-101)
+      //   Module 2  — Component data model + factory function
+      //   Module 3  — Canvas renderer (all 4 component types)
+      //   Module 4  — Panel drag → canvas drop + ghost preview
+      //   Module 5  — Hit testing & selection
+      //   Module 6  — Move drag (reposition on canvas)
+      //   Module 7  — Properties panel (value edit, rotate, delete)
+      //   Module 8  — Rotate & Delete actions
+      //   Module 9  — Undo system (snapshot, max 30)
+      //   Module 10 — Zoom & pan (unchanged from tsk-101)
+      //   Module 11 — Toolbar, shortcuts, toast, tooltip
+      // ═══════════════════════════════════════════════════════════
 
+      // ── Module 1: Canvas setup ───────────────────────────────
+      const canvas = document.getElementById("circuit-canvas");
+      const ctx = canvas.getContext("2d");
+      const wrap = document.getElementById("canvas-wrap");
+      const GRID = 20;
+      const ZOOM_MIN = 0.35,
+        ZOOM_MAX = 3.0,
+        ZOOM_STEP = 0.12;
 
-  <!-- ═══════════════════════════════════════════════
-       TASK 1 JAVASCRIPT
-       This script handles everything visible in Task 1:
-       - Canvas sizing and dot-grid rendering
-       - Toolbar tool switching
-       - Wire colour swatch selection
-       - Zoom controls (buttons + mouse wheel)
-       - Status badge updates
-       - Coordinate readout on mouse move
-       - Toast notification system
-       - Clear modal logic
-       - Keyboard shortcut dispatcher
-       - Tooltip system for panel cards
-       NOTE: Simulation, wiring, and component placement
-       logic will be added in Tasks 2–14. This file is
-       the foundation only.
-  ════════════════════════════════════════════════ -->
-  <script>
-    /* ─── 1. CANVAS SETUP & GRID RENDERER ─────────────────
-       The canvas must exactly match its CSS container size.
-       devicePixelRatio ensures sharp rendering on HiDPI
-       (Retina) displays by drawing at 2× resolution then
-       scaling back with CSS.
-    ────────────────────────────────────────────────────── */
-    const canvas  = document.getElementById('circuit-canvas');
-    const ctx     = canvas.getContext('2d');
-    const wrap    = document.getElementById('canvas-wrap');
+      const state = {
+        pan: { x: 0, y: 0 },
+        zoom: 1.0,
+        mode: "select",
+        wireColor: "#60A5FA",
+        mouseGrid: { x: 0, y: 0 },
+        components: [],
+        wires: [],
+        selectedId: null,
+        undoStack: [],
+        moveDrag: null,
+      };
 
-    // App state — pan, zoom, and active mode
-    const state = {
-      pan:      { x: 0, y: 0 },
-      zoom:     1.0,
-      mode:     'select',
-      wireColor:'#60A5FA',
-      mouseGrid:{ x: 0, y: 0 },
-    };
-
-    const GRID        = 20;    // pixels per grid unit at zoom=1
-    const ZOOM_MIN    = 0.35;
-    const ZOOM_MAX    = 3.0;
-    const ZOOM_STEP   = 0.12;
-
-    /* Resize canvas buffer to match its CSS display size */
-    function resizeCanvas() {
-      const dpr = window.devicePixelRatio || 1;
-      const w   = wrap.clientWidth;
-      const h   = wrap.clientHeight;
-      canvas.width  = w * dpr;
-      canvas.height = h * dpr;
-      canvas.style.width  = w + 'px';
-      canvas.style.height = h + 'px';
-      ctx.scale(dpr, dpr);
-      render();
-    }
-
-    /* Watch the canvas container for size changes */
-    new ResizeObserver(resizeCanvas).observe(wrap);
-
-    /* Convert grid coordinates → canvas pixels */
-    function toCanvas(gx, gy) {
-      return {
+      const css = (v) =>
+        getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+      const toCanvas = (gx, gy) => ({
         x: gx * GRID * state.zoom + state.pan.x,
         y: gy * GRID * state.zoom + state.pan.y,
-      };
-    }
-
-    /* Convert canvas pixels → nearest grid coordinate */
-    function toGrid(cx, cy) {
-      return {
+      });
+      const toGrid = (cx, cy) => ({
         x: Math.round((cx - state.pan.x) / (GRID * state.zoom)),
         y: Math.round((cy - state.pan.y) / (GRID * state.zoom)),
-      };
-    }
+      });
 
-    /* Draw the dot grid */
-    function drawGrid() {
-      const W       = wrap.clientWidth;
-      const H       = wrap.clientHeight;
-      const spacing = GRID * state.zoom;
-      const offX    = ((state.pan.x % spacing) + spacing) % spacing;
-      const offY    = ((state.pan.y % spacing) + spacing) % spacing;
-      const dotR    = Math.max(0.8, 1.5 * state.zoom);
-
-      ctx.fillStyle = getComputedStyle(document.documentElement)
-                        .getPropertyValue('--color-canvas-dot').trim();
-
-      for (let x = offX; x < W; x += spacing)
-        for (let y = offY; y < H; y += spacing) {
-          ctx.beginPath();
-          ctx.arc(x, y, dotR, 0, Math.PI * 2);
-          ctx.fill();
-        }
-    }
-
-    /* Master render function — clears then redraws everything */
-    function render() {
-      const W = wrap.clientWidth;
-      const H = wrap.clientHeight;
-      ctx.clearRect(0, 0, W, H);
-      drawGrid();
-      // Future tasks will add: drawWires(), drawComponents(), drawResults()
-    }
-
-
-    /* ─── 2. ZOOM ──────────────────────────────────────────
-       Zooming keeps the canvas centre point stable.
-       We adjust pan so the visible centre stays the same
-       after the scale changes.
-    ────────────────────────────────────────────────────── */
-    function setZoom(newZoom, focusX, focusY) {
-      newZoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, newZoom));
-      if (newZoom === state.zoom) return;
-
-      /* Default focus = canvas centre */
-      const cx = focusX ?? wrap.clientWidth  / 2;
-      const cy = focusY ?? wrap.clientHeight / 2;
-
-      /* Adjust pan so the focal point stays fixed */
-      const ratio = newZoom / state.zoom;
-      state.pan.x = cx - (cx - state.pan.x) * ratio;
-      state.pan.y = cy - (cy - state.pan.y) * ratio;
-      state.zoom  = newZoom;
-
-      document.getElementById('zoom-display').textContent =
-        Math.round(newZoom * 100) + '%';
-
-      render();
-    }
-
-    document.getElementById('btn-zoom-in' ).addEventListener('click', () => setZoom(state.zoom + ZOOM_STEP));
-    document.getElementById('btn-zoom-out').addEventListener('click', () => setZoom(state.zoom - ZOOM_STEP));
-
-    /* Mouse-wheel zoom — focused on cursor position */
-    canvas.addEventListener('wheel', (e) => {
-      e.preventDefault();
-      const rect  = canvas.getBoundingClientRect();
-      const cx    = e.clientX - rect.left;
-      const cy    = e.clientY - rect.top;
-      const delta = e.deltaY < 0 ? ZOOM_STEP : -ZOOM_STEP;
-      setZoom(state.zoom + delta, cx, cy);
-    }, { passive: false });
-
-
-    /* ─── 3. PAN ───────────────────────────────────────────
-       Pan is activated by:
-       (a) Middle mouse button drag
-       (b) Spacebar held + left mouse drag
-    ────────────────────────────────────────────────────── */
-    let panStart  = null;
-    let spaceHeld = false;
-
-    document.addEventListener('keydown', (e) => {
-      if (e.code === 'Space' && !e.repeat) {
-        spaceHeld = true;
-        if (state.mode === 'select') setMode('pan');
-        e.preventDefault();
-      }
-    });
-    document.addEventListener('keyup', (e) => {
-      if (e.code === 'Space') {
-        spaceHeld = false;
-        if (state.mode === 'pan') setMode('select');
-      }
-    });
-
-    canvas.addEventListener('mousedown', (e) => {
-      /* Middle button or space+left = start pan */
-      if (e.button === 1 || (e.button === 0 && spaceHeld)) {
-        panStart = { x: e.clientX - state.pan.x, y: e.clientY - state.pan.y };
-        e.preventDefault();
-      }
-    });
-
-    window.addEventListener('mousemove', (e) => {
-      if (panStart) {
-        state.pan.x = e.clientX - panStart.x;
-        state.pan.y = e.clientY - panStart.y;
+      function resizeCanvas() {
+        const dpr = window.devicePixelRatio || 1,
+          w = wrap.clientWidth,
+          h = wrap.clientHeight;
+        canvas.width = w * dpr;
+        canvas.height = h * dpr;
+        canvas.style.width = w + "px";
+        canvas.style.height = h + "px";
+        ctx.scale(dpr, dpr);
         render();
       }
-    });
+      new ResizeObserver(resizeCanvas).observe(wrap);
 
-    window.addEventListener('mouseup', (e) => {
-      if (e.button === 1 || e.button === 0) panStart = null;
-    });
+      // ── Module 2: Component data model ───────────────────────
+      const _cnt = { RESISTOR: 0, VOLTAGE_SOURCE: 0, LED: 0, SWITCH: 0 };
+      const DEFAULTS = {
+        RESISTOR: { value: 1000, label: "R" },
+        VOLTAGE_SOURCE: { value: 9, label: "V" },
+        LED: { value: 2.0, label: "D" },
+        SWITCH: { value: 0, label: "SW", closed: false },
+      };
+      const TERM_OFF = {
+        RESISTOR: [
+          { label: "A", ox: -3, oy: 0 },
+          { label: "B", ox: 3, oy: 0 },
+        ],
+        VOLTAGE_SOURCE: [
+          { label: "A", ox: -3, oy: 0 },
+          { label: "B", ox: 3, oy: 0 },
+        ],
+        LED: [
+          { label: "A", ox: -3, oy: 0 },
+          { label: "B", ox: 3, oy: 0 },
+        ],
+        SWITCH: [
+          { label: "A", ox: -3, oy: 0 },
+          { label: "B", ox: 3, oy: 0 },
+        ],
+      };
+      const ID_PREFIX = {
+        RESISTOR: "r",
+        VOLTAGE_SOURCE: "v",
+        LED: "d",
+        SWITCH: "sw",
+      };
 
+      function createComponent(type, gx, gy) {
+        _cnt[type]++;
+        const n = _cnt[type];
+        const id = ID_PREFIX[type] + n;
+        const d = DEFAULTS[type];
+        return {
+          id,
+          type,
+          x: gx,
+          y: gy,
+          rotation: 0,
+          value: d.value,
+          label: d.label + n,
+          closed: d.closed ?? null,
+          terminals: TERM_OFF[type].map((t) => ({
+            id: id + "_" + t.label,
+            componentId: id,
+            label: t.label,
+            ox: t.ox,
+            oy: t.oy,
+            node: null,
+          })),
+        };
+      }
 
-    /* ─── 4. MOUSE COORDINATE READOUT ─────────────────────
-       Shows the grid position under the cursor in the
-       bottom-left corner of the canvas.
-    ────────────────────────────────────────────────────── */
-    const coordsEl = document.getElementById('canvas-coords');
-    canvas.addEventListener('mousemove', (e) => {
-      const rect = canvas.getBoundingClientRect();
-      const gp   = toGrid(e.clientX - rect.left, e.clientY - rect.top);
-      state.mouseGrid = gp;
-      coordsEl.textContent = `x: ${gp.x}  y: ${gp.y}`;
-    });
+      function termPos(comp, term) {
+        const rad = (comp.rotation * Math.PI) / 180;
+        return {
+          x: comp.x + term.ox * Math.cos(rad) - term.oy * Math.sin(rad),
+          y: comp.y + term.ox * Math.sin(rad) + term.oy * Math.cos(rad),
+        };
+      }
 
+      // ── Module 3: Canvas renderer ─────────────────────────────
+      const COMP_COLORS = {
+        RESISTOR: "#60A5FA",
+        VOLTAGE_SOURCE: "#F59E0B",
+        LED: "#22C55E",
+        SWITCH: "#94A3B8",
+      };
 
-    /* ─── 5. TOOL SWITCHING ────────────────────────────────
-       Sets the active tool in state, updates button
-       aria-pressed attributes, and swaps the cursor.
-    ────────────────────────────────────────────────────── */
-    function setMode(mode) {
-      state.mode = mode;
-      wrap.setAttribute('data-mode', mode === 'pan' ? 'pan' : mode);
+      function drawSelBox(ctx, hw, hh, zoom) {
+        const p = 6 * zoom;
+        ctx.save();
+        ctx.strokeStyle = css("--color-accent");
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([4, 3]);
+        ctx.shadowColor = css("--color-accent");
+        ctx.shadowBlur = 8;
+        ctx.strokeRect(-(hw + p), -(hh + p), (hw + p) * 2, (hh + p) * 2);
+        ctx.setLineDash([]);
+        ctx.shadowBlur = 0;
+        ctx.restore();
+      }
 
-      document.querySelectorAll('.tool-btn').forEach(btn => {
-        const isActive = btn.dataset.tool === mode;
-        btn.classList.toggle('active', isActive);
-        btn.setAttribute('aria-pressed', isActive);
+      function drawTermDots(ctx, comp, zoom) {
+        const col = COMP_COLORS[comp.type];
+        comp.terminals.forEach((t) => {
+          const rad = (comp.rotation * Math.PI) / 180;
+          const rx =
+            t.ox * GRID * zoom * Math.cos(rad) -
+            t.oy * GRID * zoom * Math.sin(rad);
+          const ry =
+            t.ox * GRID * zoom * Math.sin(rad) +
+            t.oy * GRID * zoom * Math.cos(rad);
+          ctx.beginPath();
+          ctx.arc(rx, ry, 3.5 * zoom, 0, Math.PI * 2);
+          ctx.fillStyle = col;
+          ctx.fill();
+          ctx.strokeStyle = css("--color-bg-canvas");
+          ctx.lineWidth = 1;
+          ctx.stroke();
+        });
+      }
+
+      function fmtVal(comp) {
+        if (comp.type === "RESISTOR")
+          return comp.value >= 1e6
+            ? comp.value / 1e6 + " MΩ"
+            : comp.value >= 1e3
+              ? comp.value / 1e3 + " kΩ"
+              : comp.value + " Ω";
+        if (comp.type === "VOLTAGE_SOURCE") return comp.value + " V";
+        if (comp.type === "LED") return "Vf " + comp.value + " V";
+        if (comp.type === "SWITCH") return comp.closed ? "closed" : "open";
+      }
+
+      function drawCompLabel(ctx, comp, zoom) {
+        ctx.save();
+        ctx.textAlign = "center";
+        ctx.textBaseline = "top";
+        ctx.fillStyle = css("--color-text-secondary");
+        ctx.font = 10 * zoom + "px Syne,sans-serif";
+        ctx.fillText(comp.label, 0, 18 * zoom);
+        ctx.fillStyle = css("--color-text-disabled");
+        ctx.font = 9 * zoom + "px JetBrains Mono,monospace";
+        ctx.fillText(fmtVal(comp), 0, 30 * zoom);
+        ctx.restore();
+      }
+
+      function drawResistor(ctx, comp, zoom) {
+        ctx.save();
+        const c = toCanvas(comp.x, comp.y);
+        ctx.translate(c.x, c.y);
+        ctx.rotate((comp.rotation * Math.PI) / 180);
+        if (comp.id === state.selectedId)
+          drawSelBox(ctx, 30 * zoom, 10 * zoom, zoom);
+        const col = COMP_COLORS.RESISTOR;
+        ctx.strokeStyle = col;
+        ctx.lineWidth = 2 * zoom;
+        ctx.lineJoin = "round";
+        ctx.lineCap = "round";
+        ctx.beginPath();
+        ctx.moveTo(-30 * zoom, 0);
+        ctx.lineTo(-12 * zoom, 0);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(12 * zoom, 0);
+        ctx.lineTo(30 * zoom, 0);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(-12 * zoom, 0);
+        [-9, -6, -3, 0, 3, 6, 9, 12]
+          .map((v) => v * zoom)
+          .forEach((x, i) => ctx.lineTo(x, (i % 2 === 0 ? -6 : 6) * zoom));
+        ctx.stroke();
+        drawTermDots(ctx, comp, zoom);
+        drawCompLabel(ctx, comp, zoom);
+        ctx.restore();
+      }
+
+      function drawVSource(ctx, comp, zoom) {
+        ctx.save();
+        const c = toCanvas(comp.x, comp.y);
+        ctx.translate(c.x, c.y);
+        ctx.rotate((comp.rotation * Math.PI) / 180);
+        if (comp.id === state.selectedId)
+          drawSelBox(ctx, 30 * zoom, 12 * zoom, zoom);
+        const col = COMP_COLORS.VOLTAGE_SOURCE;
+        ctx.strokeStyle = col;
+        ctx.lineWidth = 2 * zoom;
+        ctx.lineCap = "round";
+        ctx.beginPath();
+        ctx.moveTo(-30 * zoom, 0);
+        ctx.lineTo(-12 * zoom, 0);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(12 * zoom, 0);
+        ctx.lineTo(30 * zoom, 0);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(0, 0, 12 * zoom, 0, Math.PI * 2);
+        ctx.fillStyle = css("--color-bg-canvas");
+        ctx.fill();
+        ctx.strokeStyle = col;
+        ctx.stroke();
+        ctx.lineWidth = 1.8 * zoom;
+        // + (right/B side)
+        ctx.beginPath();
+        ctx.moveTo(4 * zoom, -3 * zoom);
+        ctx.lineTo(4 * zoom, 3 * zoom);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(1 * zoom, 0);
+        ctx.lineTo(7 * zoom, 0);
+        ctx.stroke();
+        // - (left/A side)
+        ctx.beginPath();
+        ctx.moveTo(-7 * zoom, 0);
+        ctx.lineTo(-1 * zoom, 0);
+        ctx.stroke();
+        drawTermDots(ctx, comp, zoom);
+        drawCompLabel(ctx, comp, zoom);
+        ctx.restore();
+      }
+
+      function drawLED(ctx, comp, zoom, current) {
+        current = current || 0;
+        ctx.save();
+        const c = toCanvas(comp.x, comp.y);
+        ctx.translate(c.x, c.y);
+        ctx.rotate((comp.rotation * Math.PI) / 180);
+        if (comp.id === state.selectedId)
+          drawSelBox(ctx, 30 * zoom, 10 * zoom, zoom);
+        const col = COMP_COLORS.LED,
+          lit = current >= 0.01;
+        if (lit) {
+          ctx.shadowColor = col;
+          ctx.shadowBlur = 18 * zoom;
+        }
+        ctx.strokeStyle = col;
+        ctx.lineWidth = 2 * zoom;
+        ctx.lineCap = "round";
+        ctx.beginPath();
+        ctx.moveTo(-30 * zoom, 0);
+        ctx.lineTo(-8 * zoom, 0);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(8 * zoom, 0);
+        ctx.lineTo(30 * zoom, 0);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(-8 * zoom, -8 * zoom);
+        ctx.lineTo(-8 * zoom, 8 * zoom);
+        ctx.lineTo(8 * zoom, 0);
+        ctx.closePath();
+        ctx.fillStyle = lit ? "rgba(34,197,94,0.35)" : "rgba(34,197,94,0.15)";
+        ctx.fill();
+        ctx.strokeStyle = col;
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(8 * zoom, -8 * zoom);
+        ctx.lineTo(8 * zoom, 8 * zoom);
+        ctx.stroke();
+        ctx.shadowBlur = 0;
+        ctx.lineWidth = 1.2 * zoom;
+        [
+          [12, -4, 17, -9],
+          [16, -1, 21, -6],
+        ].forEach(([x1, y1, x2, y2]) => {
+          ctx.beginPath();
+          ctx.moveTo(x1 * zoom, y1 * zoom);
+          ctx.lineTo(x2 * zoom, y2 * zoom);
+          ctx.stroke();
+        });
+        drawTermDots(ctx, comp, zoom);
+        drawCompLabel(ctx, comp, zoom);
+        ctx.restore();
+      }
+
+      function drawSwitch(ctx, comp, zoom) {
+        ctx.save();
+        const c = toCanvas(comp.x, comp.y);
+        ctx.translate(c.x, c.y);
+        ctx.rotate((comp.rotation * Math.PI) / 180);
+        if (comp.id === state.selectedId)
+          drawSelBox(ctx, 30 * zoom, 12 * zoom, zoom);
+        const col = comp.closed
+          ? css("--color-comp-switch-on")
+          : COMP_COLORS.SWITCH;
+        ctx.strokeStyle = col;
+        ctx.lineWidth = 2 * zoom;
+        ctx.lineCap = "round";
+        ctx.beginPath();
+        ctx.moveTo(-30 * zoom, 0);
+        ctx.lineTo(-10 * zoom, 0);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(10 * zoom, 0);
+        ctx.lineTo(30 * zoom, 0);
+        ctx.stroke();
+        [
+          [-10, 0],
+          [10, 0],
+        ].forEach(([x, y]) => {
+          ctx.beginPath();
+          ctx.arc(x * zoom, y * zoom, 2.5 * zoom, 0, Math.PI * 2);
+          ctx.fillStyle = col;
+          ctx.fill();
+        });
+        ctx.beginPath();
+        ctx.moveTo(-10 * zoom, 0);
+        ctx.lineTo(10 * zoom, comp.closed ? 0 : -10 * zoom);
+        ctx.stroke();
+        drawTermDots(ctx, comp, zoom);
+        drawCompLabel(ctx, comp, zoom);
+        ctx.restore();
+      }
+
+      const DRAW_FN = {
+        RESISTOR: drawResistor,
+        VOLTAGE_SOURCE: drawVSource,
+        LED: drawLED,
+        SWITCH: drawSwitch,
+      };
+
+      function drawGrid() {
+        const W = wrap.clientWidth,
+          H = wrap.clientHeight;
+        const sp = GRID * state.zoom;
+        const ox = ((state.pan.x % sp) + sp) % sp,
+          oy = ((state.pan.y % sp) + sp) % sp;
+        const dr = Math.max(0.8, 1.5 * state.zoom);
+        ctx.fillStyle = css("--color-canvas-dot");
+        for (let x = ox; x < W; x += sp)
+          for (let y = oy; y < H; y += sp) {
+            ctx.beginPath();
+            ctx.arc(x, y, dr, 0, Math.PI * 2);
+            ctx.fill();
+          }
+      }
+
+      function drawSnapIndicator() {
+        if (!panelDrag.active) return;
+        const gp = toCanvas(panelDrag.snapX, panelDrag.snapY);
+        ctx.save();
+        ctx.strokeStyle = "rgba(79,142,247,0.5)";
+        ctx.lineWidth = 1;
+        ctx.setLineDash([3, 3]);
+        const sz = 10 * state.zoom;
+        ctx.beginPath();
+        ctx.moveTo(gp.x - sz, gp.y);
+        ctx.lineTo(gp.x + sz, gp.y);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(gp.x, gp.y - sz);
+        ctx.lineTo(gp.x, gp.y + sz);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.restore();
+      }
+
+      function render() {
+        const W = wrap.clientWidth,
+          H = wrap.clientHeight;
+        ctx.clearRect(0, 0, W, H);
+        drawGrid();
+        drawSnapIndicator();
+        state.components.forEach((c) => {
+          const f = DRAW_FN[c.type];
+          if (f) f(ctx, c, state.zoom);
+        });
+      }
+
+      // ── Module 4: Panel drag → canvas drop ───────────────────
+      const panelDrag = { active: false, type: null, snapX: 0, snapY: 0 };
+      const ghost = document.getElementById("drag-ghost");
+      const ghostCtx = ghost.getContext("2d");
+
+      function drawGhostComp(type) {
+        ghostCtx.clearRect(0, 0, ghost.width, ghost.height);
+        ghostCtx.save();
+        ghostCtx.translate(ghost.width / 2, ghost.height / 2);
+        ghostCtx.globalAlpha = 0.75;
+        const col = COMP_COLORS[type];
+        ghostCtx.strokeStyle = col;
+        ghostCtx.lineWidth = 2;
+        ghostCtx.lineCap = "round";
+        ghostCtx.lineJoin = "round";
+        if (type === "RESISTOR") {
+          ghostCtx.beginPath();
+          ghostCtx.moveTo(-30, 0);
+          ghostCtx.lineTo(-12, 0);
+          ghostCtx.stroke();
+          ghostCtx.beginPath();
+          ghostCtx.moveTo(12, 0);
+          ghostCtx.lineTo(30, 0);
+          ghostCtx.stroke();
+          ghostCtx.beginPath();
+          ghostCtx.moveTo(-12, 0);
+          [-9, -6, -3, 0, 3, 6, 9, 12].forEach((x, i) =>
+            ghostCtx.lineTo(x, i % 2 === 0 ? -6 : 6),
+          );
+          ghostCtx.stroke();
+        } else if (type === "VOLTAGE_SOURCE") {
+          ghostCtx.beginPath();
+          ghostCtx.moveTo(-30, 0);
+          ghostCtx.lineTo(-12, 0);
+          ghostCtx.stroke();
+          ghostCtx.beginPath();
+          ghostCtx.moveTo(12, 0);
+          ghostCtx.lineTo(30, 0);
+          ghostCtx.stroke();
+          ghostCtx.beginPath();
+          ghostCtx.arc(0, 0, 12, 0, Math.PI * 2);
+          ghostCtx.fillStyle = "rgba(10,14,26,0.8)";
+          ghostCtx.fill();
+          ghostCtx.strokeStyle = col;
+          ghostCtx.stroke();
+        } else if (type === "LED") {
+          ghostCtx.beginPath();
+          ghostCtx.moveTo(-30, 0);
+          ghostCtx.lineTo(-8, 0);
+          ghostCtx.stroke();
+          ghostCtx.beginPath();
+          ghostCtx.moveTo(8, 0);
+          ghostCtx.lineTo(30, 0);
+          ghostCtx.stroke();
+          ghostCtx.beginPath();
+          ghostCtx.moveTo(-8, -8);
+          ghostCtx.lineTo(-8, 8);
+          ghostCtx.lineTo(8, 0);
+          ghostCtx.closePath();
+          ghostCtx.fillStyle = "rgba(34,197,94,0.20)";
+          ghostCtx.fill();
+          ghostCtx.strokeStyle = col;
+          ghostCtx.stroke();
+          ghostCtx.beginPath();
+          ghostCtx.moveTo(8, -8);
+          ghostCtx.lineTo(8, 8);
+          ghostCtx.stroke();
+        } else if (type === "SWITCH") {
+          ghostCtx.beginPath();
+          ghostCtx.moveTo(-30, 0);
+          ghostCtx.lineTo(-10, 0);
+          ghostCtx.stroke();
+          ghostCtx.beginPath();
+          ghostCtx.moveTo(10, 0);
+          ghostCtx.lineTo(30, 0);
+          ghostCtx.stroke();
+          ghostCtx.beginPath();
+          ghostCtx.moveTo(-10, 0);
+          ghostCtx.lineTo(10, -10);
+          ghostCtx.stroke();
+        }
+        ghostCtx.restore();
+      }
+
+      document.querySelectorAll(".component-card").forEach((card) => {
+        card.addEventListener("mousedown", (e) => {
+          if (e.button !== 0) return;
+          e.preventDefault();
+          panelDrag.active = true;
+          panelDrag.type = card.dataset.type;
+          ghost.style.display = "block";
+          drawGhostComp(card.dataset.type);
+          ghost.style.left = e.clientX + "px";
+          ghost.style.top = e.clientY + "px";
+        });
       });
 
-      setStatus(
-        mode === 'wire'   ? 'active' :
-        mode === 'ground' ? 'active' : 'ready',
-        mode === 'wire'   ? 'Wire mode — click a terminal to start' :
-        mode === 'ground' ? 'Click a node to set as ground' :
-        mode === 'pan'    ? 'Panning' : 'Ready'
+      window.addEventListener("mousemove", (e) => {
+        if (!panelDrag.active) return;
+        ghost.style.left = e.clientX + "px";
+        ghost.style.top = e.clientY + "px";
+        const rect = canvas.getBoundingClientRect();
+        if (
+          e.clientX >= rect.left &&
+          e.clientX <= rect.right &&
+          e.clientY >= rect.top &&
+          e.clientY <= rect.bottom
+        ) {
+          const gp = toGrid(e.clientX - rect.left, e.clientY - rect.top);
+          panelDrag.snapX = gp.x;
+          panelDrag.snapY = gp.y;
+          render();
+        }
+      });
+
+      window.addEventListener("mouseup", (e) => {
+        if (!panelDrag.active) return;
+        ghost.style.display = "none";
+        const rect = canvas.getBoundingClientRect();
+        const over =
+          e.clientX >= rect.left &&
+          e.clientX <= rect.right &&
+          e.clientY >= rect.top &&
+          e.clientY <= rect.bottom;
+        if (over) {
+          pushUndo();
+          const comp = createComponent(
+            panelDrag.type,
+            panelDrag.snapX,
+            panelDrag.snapY,
+          );
+          state.components.push(comp);
+          selectComponent(comp.id);
+          updateCount();
+          render();
+          showToast(
+            comp.label + " placed at (" + comp.x + ", " + comp.y + ")",
+            "success",
+            2000,
+          );
+        }
+        panelDrag.active = false;
+        panelDrag.type = null;
+        render();
+      });
+
+      // ── Module 5: Hit testing & selection ────────────────────
+      const HIT = {
+        RESISTOR: { hw: 3, hh: 0.8 },
+        VOLTAGE_SOURCE: { hw: 3, hh: 1 },
+        LED: { hw: 3, hh: 0.8 },
+        SWITCH: { hw: 3, hh: 0.8 },
+      };
+
+      function hitTest(comp, cx, cy) {
+        const centre = toCanvas(comp.x, comp.y);
+        const dx = cx - centre.x,
+          dy = cy - centre.y;
+        const a = -((comp.rotation * Math.PI) / 180);
+        const lx = dx * Math.cos(a) - dy * Math.sin(a),
+          ly = dx * Math.sin(a) + dy * Math.cos(a);
+        const b = HIT[comp.type] ?? { hw: 3, hh: 1 },
+          m = 8 * state.zoom;
+        return (
+          Math.abs(lx) < b.hw * GRID * state.zoom + m &&
+          Math.abs(ly) < b.hh * GRID * state.zoom + m
+        );
+      }
+
+      function selectComponent(id) {
+        state.selectedId = id;
+        const comp = state.components.find((c) => c.id === id);
+        if (comp) openProps(comp);
+        else closeProps();
+        render();
+      }
+      function deselectAll() {
+        state.selectedId = null;
+        closeProps();
+        render();
+      }
+
+      canvas.addEventListener("mousedown", (e) => {
+        if (e.button !== 0 || state.mode !== "select" || panelDrag.active)
+          return;
+        const rect = canvas.getBoundingClientRect(),
+          cx = e.clientX - rect.left,
+          cy = e.clientY - rect.top;
+        const hit = [...state.components]
+          .reverse()
+          .find((c) => hitTest(c, cx, cy));
+        if (hit) {
+          selectComponent(hit.id);
+          state.moveDrag = {
+            id: hit.id,
+            startX: hit.x,
+            startY: hit.y,
+            mx: e.clientX,
+            my: e.clientY,
+            moved: false,
+          };
+        } else {
+          deselectAll();
+          state.moveDrag = null;
+        }
+      });
+
+      // ── Module 6: Move drag ───────────────────────────────────
+      window.addEventListener("mousemove", (e) => {
+        if (!state.moveDrag || panelDrag.active) return;
+        const dx = e.clientX - state.moveDrag.mx,
+          dy = e.clientY - state.moveDrag.my;
+        if (Math.sqrt(dx * dx + dy * dy) < 4) return;
+        state.moveDrag.moved = true;
+        const comp = state.components.find((c) => c.id === state.moveDrag.id);
+        if (!comp) return;
+        comp.x = state.moveDrag.startX + Math.round(dx / (GRID * state.zoom));
+        comp.y = state.moveDrag.startY + Math.round(dy / (GRID * state.zoom));
+        render();
+      });
+      window.addEventListener("mouseup", (e) => {
+        if (state.moveDrag && state.moveDrag.moved) pushUndo();
+        state.moveDrag = null;
+      });
+
+      // Toggle switch on double-click
+      canvas.addEventListener("dblclick", (e) => {
+        if (state.mode !== "select") return;
+        const rect = canvas.getBoundingClientRect(),
+          cx = e.clientX - rect.left,
+          cy = e.clientY - rect.top;
+        const hit = [...state.components]
+          .reverse()
+          .find((c) => c.type === "SWITCH" && hitTest(c, cx, cy));
+        if (hit) {
+          pushUndo();
+          hit.closed = !hit.closed;
+          render();
+          updateProps();
+          showToast(
+            hit.label + " " + (hit.closed ? "closed" : "opened"),
+            "info",
+            1500,
+          );
+        }
+      });
+
+      // ── Module 7: Properties panel ────────────────────────────
+      const propPanel = document.getElementById("properties-panel");
+      const propId = document.getElementById("prop-id");
+      const propLabel = document.getElementById("prop-label");
+      const propInput = document.getElementById("prop-input");
+      const propUnit = document.getElementById("prop-unit");
+      const UNIT_MAP = {
+        RESISTOR: { l: "Value", u: "Ω" },
+        VOLTAGE_SOURCE: { l: "Voltage", u: "V" },
+        LED: { l: "Vf", u: "V" },
+        SWITCH: { l: "State", u: "" },
+      };
+
+      function openProps(comp) {
+        const m = UNIT_MAP[comp.type] ?? { l: "Value", u: "" };
+        propId.textContent = comp.id;
+        propLabel.textContent = m.l;
+        propUnit.textContent = m.u;
+        if (comp.type === "SWITCH") {
+          propInput.type = "text";
+          propInput.value = comp.closed ? "closed" : "open";
+          propInput.readOnly = true;
+        } else {
+          propInput.type = "number";
+          propInput.readOnly = false;
+          propInput.value = comp.value;
+          propInput.min = comp.type === "RESISTOR" ? "0.001" : "0";
+          propInput.step = "0.1";
+        }
+        propPanel.classList.add("open");
+      }
+      function closeProps() {
+        propPanel.classList.remove("open");
+        propId.textContent = "—";
+      }
+      function updateProps() {
+        if (state.selectedId) {
+          const c = state.components.find((c) => c.id === state.selectedId);
+          if (c) openProps(c);
+        }
+      }
+
+      propInput.addEventListener("input", () => {
+        if (!state.selectedId) return;
+        const comp = state.components.find((c) => c.id === state.selectedId);
+        if (!comp || comp.type === "SWITCH") return;
+        const v = parseFloat(propInput.value);
+        if (!isNaN(v) && v > 0) {
+          comp.value = v;
+          render();
+        }
+      });
+      propInput.addEventListener("change", pushUndo);
+      document
+        .getElementById("prop-rotate")
+        .addEventListener("click", rotateSelected);
+      document
+        .getElementById("prop-delete")
+        .addEventListener("click", deleteSelected);
+
+      // ── Module 8: Rotate & Delete ─────────────────────────────
+      function rotateSelected() {
+        if (!state.selectedId) return;
+        const comp = state.components.find((c) => c.id === state.selectedId);
+        if (!comp) return;
+        pushUndo();
+        comp.rotation = (comp.rotation + 90) % 360;
+        render();
+        updateProps();
+      }
+      function deleteSelected() {
+        if (!state.selectedId) return;
+        const i = state.components.findIndex((c) => c.id === state.selectedId);
+        if (i === -1) return;
+        pushUndo();
+        const comp = state.components[i];
+        state.wires = state.wires.filter(
+          (w) =>
+            !comp.terminals.some(
+              (t) => t.id === w.fromTermId || t.id === w.toTermId,
+            ),
+        );
+        state.components.splice(i, 1);
+        deselectAll();
+        updateCount();
+        render();
+        showToast(comp.label + " deleted.", "info", 1500);
+      }
+
+      // ── Module 9: Undo ────────────────────────────────────────
+      function pushUndo() {
+        state.undoStack.push({
+          components: JSON.parse(JSON.stringify(state.components)),
+          wires: JSON.parse(JSON.stringify(state.wires)),
+        });
+        if (state.undoStack.length > 30) state.undoStack.shift();
+      }
+      function undo() {
+        const snap = state.undoStack.pop();
+        if (!snap) {
+          showToast("Nothing to undo.", "warning", 1500);
+          return;
+        }
+        state.components = snap.components;
+        state.wires = snap.wires;
+        state.selectedId = null;
+        closeProps();
+        updateCount();
+        render();
+        showToast("Undo.", "info", 1200);
+      }
+
+      function updateCount() {
+        const n = state.components.length;
+        document.getElementById("canvas-component-count").textContent =
+          n === 0 ? "0 on canvas" : n === 1 ? "1 component" : n + " components";
+      }
+
+      // ── Module 10: Zoom & Pan ─────────────────────────────────
+      function setZoom(nz, fx, fy) {
+        nz = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, nz));
+        if (nz === state.zoom) return;
+        const cx = fx ?? wrap.clientWidth / 2,
+          cy = fy ?? wrap.clientHeight / 2,
+          r = nz / state.zoom;
+        state.pan.x = cx - (cx - state.pan.x) * r;
+        state.pan.y = cy - (cy - state.pan.y) * r;
+        state.zoom = nz;
+        document.getElementById("zoom-display").textContent =
+          Math.round(nz * 100) + "%";
+        render();
+      }
+      document
+        .getElementById("btn-zoom-in")
+        .addEventListener("click", () => setZoom(state.zoom + ZOOM_STEP));
+      document
+        .getElementById("btn-zoom-out")
+        .addEventListener("click", () => setZoom(state.zoom - ZOOM_STEP));
+      canvas.addEventListener(
+        "wheel",
+        (e) => {
+          e.preventDefault();
+          const r = canvas.getBoundingClientRect();
+          setZoom(
+            state.zoom + (e.deltaY < 0 ? ZOOM_STEP : -ZOOM_STEP),
+            e.clientX - r.left,
+            e.clientY - r.top,
+          );
+        },
+        { passive: false },
       );
-    }
 
-    document.querySelectorAll('.tool-btn').forEach(btn => {
-      btn.addEventListener('click', () => setMode(btn.dataset.tool));
-    });
-
-
-    /* ─── 6. WIRE COLOUR SWATCHES ──────────────────────── */
-    document.querySelectorAll('.color-swatch').forEach(swatch => {
-      swatch.addEventListener('click', () => {
-        document.querySelectorAll('.color-swatch')
-                .forEach(s => s.classList.remove('active'));
-        swatch.classList.add('active');
-        state.wireColor = swatch.dataset.color;
+      let panStart = null,
+        spaceHeld = false;
+      document.addEventListener("keydown", (e) => {
+        if (e.code === "Space" && !e.repeat && e.target.tagName !== "INPUT") {
+          spaceHeld = true;
+          if (state.mode === "select") setMode("pan");
+          e.preventDefault();
+        }
       });
-    });
-
-
-    /* ─── 7. STATUS BADGE ──────────────────────────────── */
-    function setStatus(type, text) {
-      const dot  = document.getElementById('status-dot');
-      const span = document.getElementById('status-text');
-      dot.className  = 'canvas-status-dot ' + type;
-      span.textContent = text;
-    }
-
-
-    /* ─── 8. TOAST NOTIFICATIONS ───────────────────────── */
-    const ICONS = { success:'✓', warning:'⚠', error:'✕', info:'ℹ' };
-
-    function showToast(message, type = 'info', duration = 3000) {
-      const container = document.getElementById('toast-container');
-      const toast     = document.createElement('div');
-      toast.className = `toast ${type}`;
-      toast.innerHTML = `<span class="toast-icon">${ICONS[type] ?? 'ℹ'}</span>${message}`;
-      container.appendChild(toast);
-
-      /* Trigger slide-in */
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => toast.classList.add('visible'));
+      document.addEventListener("keyup", (e) => {
+        if (e.code === "Space") {
+          spaceHeld = false;
+          if (state.mode === "pan") setMode("select");
+        }
+      });
+      canvas.addEventListener("mousedown", (e) => {
+        if (e.button === 1 || (e.button === 0 && spaceHeld)) {
+          panStart = { x: e.clientX - state.pan.x, y: e.clientY - state.pan.y };
+          e.preventDefault();
+        }
+      });
+      window.addEventListener("mousemove", (e) => {
+        if (panStart) {
+          state.pan.x = e.clientX - panStart.x;
+          state.pan.y = e.clientY - panStart.y;
+          render();
+        }
+      });
+      window.addEventListener("mouseup", (e) => {
+        if (e.button === 1 || e.button === 0) panStart = null;
       });
 
-      /* Slide out then remove */
-      setTimeout(() => {
-        toast.classList.remove('visible');
-        toast.addEventListener('transitionend', () => toast.remove(), { once: true });
-      }, duration);
-    }
-
-
-    /* ─── 9. CLEAR CANVAS MODAL ────────────────────────── */
-    document.getElementById('btn-clear').addEventListener('click', () => {
-      document.getElementById('clear-modal').classList.add('open');
-    });
-    document.getElementById('modal-cancel').addEventListener('click', () => {
-      document.getElementById('clear-modal').classList.remove('open');
-    });
-    document.getElementById('modal-confirm').addEventListener('click', () => {
-      document.getElementById('clear-modal').classList.remove('open');
-      /* Task 2+ will clear state.components and state.wires here */
-      render();
-      showToast('Canvas cleared.', 'info');
-      document.getElementById('canvas-component-count').textContent = '0 on canvas';
-    });
-    /* Close on backdrop click */
-    document.getElementById('clear-modal').addEventListener('click', function(e) {
-      if (e.target === this) this.classList.remove('open');
-    });
-
-
-    /* ─── 10. SIMULATE BUTTON ──────────────────────────── */
-    const simBtn   = document.getElementById('btn-simulate');
-    const simLabel = document.getElementById('simulate-label');
-    let   simHasResults = false;
-
-    simBtn.addEventListener('click', () => {
-      if (simHasResults) {
-        /* Clear results mode */
-        simBtn.classList.remove('has-results');
-        simLabel.textContent = 'Simulate';
-        simHasResults = false;
-        setStatus('ready', 'Ready');
-        /* Task 11 will clear result overlays here */
-        return;
+      // ── Module 11: Toolbar, shortcuts, toast, tooltip ─────────
+      function setMode(m) {
+        state.mode = m;
+        wrap.setAttribute("data-mode", m === "pan" ? "pan" : m);
+        document.querySelectorAll(".tool-btn").forEach((b) => {
+          b.classList.toggle("active", b.dataset.tool === m);
+          b.setAttribute("aria-pressed", b.dataset.tool === m);
+        });
+        setStatus(
+          m === "wire" || m === "ground" ? "active" : "ready",
+          m === "wire"
+            ? "Wire mode — click a terminal to start"
+            : m === "ground"
+              ? "Click a node to set as ground"
+              : m === "pan"
+                ? "Panning…"
+                : "Ready",
+        );
       }
-      /* Will be replaced with real MNA call in Task 9 */
-      simBtn.classList.add('running');
-      simLabel.textContent = 'Running…';
-      setStatus('active', 'Simulating…');
+      document
+        .querySelectorAll(".tool-btn")
+        .forEach((b) =>
+          b.addEventListener("click", () => setMode(b.dataset.tool)),
+        );
+      document.querySelectorAll(".color-swatch").forEach((s) =>
+        s.addEventListener("click", () => {
+          document
+            .querySelectorAll(".color-swatch")
+            .forEach((x) => x.classList.remove("active"));
+          s.classList.add("active");
+          state.wireColor = s.dataset.color;
+        }),
+      );
 
-      setTimeout(() => {
-        simBtn.classList.remove('running');
-        /* For now just show a placeholder result */
-        showToast('Add components to simulate.', 'warning');
-        simBtn.classList.remove('has-results');
-        simLabel.textContent = 'Simulate';
-        setStatus('ready', 'Ready');
-      }, 800);
-    });
-
-
-    /* ─── 11. KEYBOARD SHORTCUTS ───────────────────────── */
-    document.addEventListener('keydown', (e) => {
-      /* Don't fire shortcuts when typing in an input */
-      if (e.target.tagName === 'INPUT') return;
-
-      switch (e.key.toLowerCase()) {
-        case 's': if (!e.ctrlKey) setMode('select');                break;
-        case 'w': if (!e.ctrlKey) setMode('wire');                  break;
-        case 'g': if (!e.ctrlKey) setMode('ground');                break;
-        case 'r': /* rotate — Task 6 will implement */              break;
-        case '?': document.getElementById('shortcuts-overlay')
-                           .classList.toggle('open');                break;
-        case 'escape':
-          document.getElementById('shortcuts-overlay').classList.remove('open');
-          document.getElementById('clear-modal').classList.remove('open');
-          if (state.mode !== 'select') setMode('select');
-          break;
+      function setStatus(type, text) {
+        document.getElementById("status-dot").className =
+          "canvas-status-dot " + type;
+        document.getElementById("status-text").textContent = text;
       }
+      const coordsEl = document.getElementById("canvas-coords");
+      canvas.addEventListener("mousemove", (e) => {
+        const r = canvas.getBoundingClientRect(),
+          gp = toGrid(e.clientX - r.left, e.clientY - r.top);
+        state.mouseGrid = gp;
+        coordsEl.textContent = "x: " + gp.x + "  y: " + gp.y;
+      });
 
-      /* Ctrl+Z = undo (Task 14) */
-      if (e.ctrlKey && e.key === 'z') {
-        e.preventDefault();
-        showToast('Undo — coming in Task 14', 'info', 1500);
-      }
-    });
+      document.addEventListener("keydown", (e) => {
+        if (e.target.tagName === "INPUT") return;
+        switch (e.key.toLowerCase()) {
+          case "s":
+            if (!e.ctrlKey) setMode("select");
+            break;
+          case "w":
+            if (!e.ctrlKey) setMode("wire");
+            break;
+          case "g":
+            if (!e.ctrlKey) setMode("ground");
+            break;
+          case "r":
+            rotateSelected();
+            break;
+          case "delete":
+          case "backspace":
+            deleteSelected();
+            break;
+          case "?":
+            document
+              .getElementById("shortcuts-overlay")
+              .classList.toggle("open");
+            break;
+          case "escape":
+            document
+              .getElementById("shortcuts-overlay")
+              .classList.remove("open");
+            document.getElementById("clear-modal").classList.remove("open");
+            if (state.mode !== "select") setMode("select");
+            if (state.selectedId) deselectAll();
+            break;
+        }
+        if (e.ctrlKey && e.key === "z") {
+          e.preventDefault();
+          undo();
+        }
+      });
 
+      document
+        .getElementById("shortcuts-overlay")
+        .addEventListener("click", function (e) {
+          if (e.target === this) this.classList.remove("open");
+        });
 
-    /* ─── 12. TOOLTIP SYSTEM ───────────────────────────── */
-    const tooltip = document.getElementById('tooltip');
-    let   tooltipTimer;
+      document
+        .getElementById("btn-clear")
+        .addEventListener("click", () =>
+          document.getElementById("clear-modal").classList.add("open"),
+        );
+      document
+        .getElementById("modal-cancel")
+        .addEventListener("click", () =>
+          document.getElementById("clear-modal").classList.remove("open"),
+        );
+      document
+        .getElementById("clear-modal")
+        .addEventListener("click", function (e) {
+          if (e.target === this) this.classList.remove("open");
+        });
+      document.getElementById("modal-confirm").addEventListener("click", () => {
+        document.getElementById("clear-modal").classList.remove("open");
+        pushUndo();
+        Object.keys(_cnt).forEach((k) => (_cnt[k] = 0));
+        state.components = [];
+        state.wires = [];
+        state.selectedId = null;
+        closeProps();
+        updateCount();
+        render();
+        showToast("Canvas cleared.", "info");
+      });
 
-    const TOOLTIPS = {
-      RESISTOR:       'Resistor\nOpposes current flow.\nDefault: 1000 Ω',
-      VOLTAGE_SOURCE: 'Voltage Source\nProvides a fixed voltage.\nDefault: 9 V',
-      LED:            'LED\nEmits light when conducting.\nVf = 2.0 V, Rf = 10 Ω',
-      SWITCH:         'Switch\nClick on canvas to toggle.\nNormally open.',
-    };
-
-    document.querySelectorAll('.component-card').forEach(card => {
-      card.addEventListener('mouseenter', (e) => {
-        const type = card.dataset.type;
-        tooltipTimer = setTimeout(() => {
-          tooltip.textContent = TOOLTIPS[type] ?? type;
-          tooltip.style.whiteSpace = 'pre-line';
-          positionTooltip(e);
-          tooltip.classList.add('visible');
+      const simBtn = document.getElementById("btn-simulate");
+      const simLabel = document.getElementById("simulate-label");
+      let simHasResults = false;
+      simBtn.addEventListener("click", () => {
+        if (simHasResults) {
+          simBtn.classList.remove("has-results");
+          simLabel.textContent = "Simulate";
+          simHasResults = false;
+          setStatus("ready", "Ready");
+          return;
+        }
+        if (state.components.length === 0) {
+          showToast("Add components to the canvas first.", "warning");
+          return;
+        }
+        simBtn.classList.add("running");
+        simLabel.textContent = "Running…";
+        setStatus("active", "Simulating…");
+        setTimeout(() => {
+          simBtn.classList.remove("running");
+          showToast("Connect the circuit before simulating.", "warning");
+          simLabel.textContent = "Simulate";
+          setStatus("ready", "Ready");
         }, 600);
       });
-      card.addEventListener('mousemove', positionTooltip);
-      card.addEventListener('mouseleave', () => {
-        clearTimeout(tooltipTimer);
-        tooltip.classList.remove('visible');
+
+      const ICONS = { success: "✓", warning: "⚠", error: "✕", info: "ℹ" };
+      function showToast(msg, type, dur) {
+        type = type || "info";
+        dur = dur || 3000;
+        const c = document.getElementById("toast-container"),
+          t = document.createElement("div");
+        t.className = "toast " + type;
+        t.innerHTML =
+          "<span style=margin-right:6px>" +
+          (ICONS[type] || "ℹ") +
+          "</span>" +
+          msg;
+        c.appendChild(t);
+        requestAnimationFrame(() =>
+          requestAnimationFrame(() => t.classList.add("visible")),
+        );
+        setTimeout(() => {
+          t.classList.remove("visible");
+          t.addEventListener("transitionend", () => t.remove(), { once: true });
+        }, dur);
+      }
+
+      const tooltip = document.getElementById("tooltip");
+      let ttTimer;
+      const TT = {
+        RESISTOR: "Resistor Opposes current flow, Default: 1000 Ω",
+        VOLTAGE_SOURCE: "Voltage Source Provides a fixed voltage. Default: 9 V",
+        LED: "LED Glows green when ≥10mA. Vf=2.0V, Rf=10Ω",
+        SWITCH: "Switch Double-click to toggle. Normally open.",
+      };
+      document.querySelectorAll(".component-card").forEach((c) => {
+        c.addEventListener("mouseenter", (e) => {
+          ttTimer = setTimeout(() => {
+            tooltip.textContent = TT[c.dataset.type] || c.dataset.type;
+            tooltip.style.whiteSpace = "pre-line";
+            posTT(e);
+            tooltip.classList.add("visible");
+          }, 600);
+        });
+        c.addEventListener("mousemove", posTT);
+        c.addEventListener("mouseleave", () => {
+          clearTimeout(ttTimer);
+          tooltip.classList.remove("visible");
+        });
       });
-    });
+      function posTT(e) {
+        const p = 14;
+        let x = e.clientX + p,
+          y = e.clientY + p;
+        if (x + tooltip.offsetWidth > window.innerWidth)
+          x = e.clientX - tooltip.offsetWidth - p;
+        if (y + tooltip.offsetHeight > window.innerHeight)
+          y = e.clientY - tooltip.offsetHeight - p;
+        tooltip.style.left = x + "px";
+        tooltip.style.top = y + "px";
+      }
 
-    function positionTooltip(e) {
-      const pad = 14;
-      let   x   = e.clientX + pad;
-      let   y   = e.clientY + pad;
-      /* Keep inside viewport */
-      const tw  = tooltip.offsetWidth;
-      const th  = tooltip.offsetHeight;
-      if (x + tw > window.innerWidth)  x = e.clientX - tw - pad;
-      if (y + th > window.innerHeight) y = e.clientY - th - pad;
-      tooltip.style.left = x + 'px';
-      tooltip.style.top  = y + 'px';
-    }
-
-
-    /* ─── 13. INITIAL RENDER ───────────────────────────── */
-    resizeCanvas();
-    setMode('select');
-    showToast('CircuitSim loaded — drag a component to begin.', 'success', 4000);
-
-  </script>
-
-</body>
+      // ── Init ──────────────────────────────────────────────────
+      resizeCanvas();
+      setMode("select");
+      showToast("Drag a component onto the canvas to begin.", "success", 4000);
+    </script>
+  </body>
 </html>
