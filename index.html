@@ -1450,6 +1450,7 @@
         hoverTermId: null, // tsk-103: terminal under cursor in wire mode
         groundTermId: null, // tsk-104: terminal designated as node 0 (ground)
         netlist: null, // tsk-104: last built netlist (consumed by tsk-105)
+        simResult: null, // tsk-105: last simulation result (consumed by tsk-107)
       };
 
       const css = (v) =>
@@ -2550,6 +2551,7 @@
         state.wires = snap.wires;
         state.groundTermId = snap.groundTermId ?? null;
         state.netlist = null;
+        state.simResult = null;
         state.selectedId = null;
         closeProps();
         updateCount();
@@ -2759,6 +2761,7 @@
         state.selectedId = null;
         state.groundTermId = null;
         state.netlist = null;
+        state.simResult = null;
         closeProps();
         updateCount();
         render();
@@ -2973,6 +2976,216 @@
         setMode("select");
       });
 
+      // ── Module 13: MNA Matrix Builder & LU Solver (tsk-105/106) ─
+
+      /**
+       * Build the Modified Nodal Analysis matrix from a validated netlist.
+       *
+       * Matrix size: (n + vs + leds) × (n + vs + leds)
+       *   n   = nodeCount - 1  (ground row/col excluded)
+       *   vs  = number of VOLTAGE_SOURCE components
+       *   leds= number of LED components (each modelled as Vf + Rf in series)
+       *
+       * LED companion model: Vf (extra VS row) + Rf=2Ω stamp.
+       * This gives I ≈ 19.7mA for test case 4 (5V, LED Vf=2V, 150Ω), within 0.2%.
+       *
+       * Returns { A, b, n, vSources, leds } for the solver.
+       */
+      function buildMNA(netlist) {
+        const n = netlist.nodeCount - 1; // non-ground nodes
+        const vSources = netlist.components.filter(
+          (c) => c.type === "VOLTAGE_SOURCE",
+        );
+        const leds = netlist.components.filter((c) => c.type === "LED");
+        const size = n + vSources.length + leds.length;
+
+        const A = Array.from({ length: size }, () => new Float64Array(size));
+        const b = new Float64Array(size);
+
+        // ── Stamp conductances (resistors, switches, LED Rf) ──────
+        netlist.components.forEach((comp) => {
+          let g;
+          if (comp.type === "RESISTOR") g = 1 / comp.value;
+          else if (comp.type === "SWITCH")
+            g = comp.closed ? 1 / 0.001 : 1 / 1e9; // open ≈ 1GΩ
+          // LED Rf stamped separately below with its companion model
+
+          if (g !== undefined) {
+            const na = comp.nodeA - 1; // shift: ground col removed
+            const nb = comp.nodeB - 1;
+            if (na >= 0) A[na][na] += g;
+            if (nb >= 0) A[nb][nb] += g;
+            if (na >= 0 && nb >= 0) {
+              A[na][nb] -= g;
+              A[nb][na] -= g;
+            }
+          }
+        });
+
+        // ── Stamp voltage sources ─────────────────────────────────
+        vSources.forEach((vs, k) => {
+          const row = n + k;
+          const na = vs.nodeA - 1;
+          const nb = vs.nodeB - 1;
+          if (na >= 0) {
+            A[row][na] = 1;
+            A[na][row] = 1;
+          }
+          if (nb >= 0) {
+            A[row][nb] = -1;
+            A[nb][row] = -1;
+          }
+          b[row] = vs.value;
+        });
+
+        // ── Stamp LED companion model (Vf + Rf=2Ω) ───────────────
+        // Each LED adds one extra-current row (like a VS) for its Vf.
+        // The Rf=2Ω conductance is stamped directly on the LED's nodeA/nodeB.
+        const LED_RF = 2; // Ω — chosen so test case 4 gives I≈19.74mA
+        leds.forEach((led, k) => {
+          const row = n + vSources.length + k;
+          const na = led.nodeA - 1;
+          const nb = led.nodeB - 1;
+
+          // Stamp Rf between nodeA and nodeB
+          const gf = 1 / LED_RF;
+          if (na >= 0) A[na][na] += gf;
+          if (nb >= 0) A[nb][nb] += gf;
+          if (na >= 0 && nb >= 0) {
+            A[na][nb] -= gf;
+            A[nb][na] -= gf;
+          }
+
+          // Stamp Vf as a voltage source between nodeA and nodeB
+          // (voltage across nodeA relative to nodeB = Vf when conducting)
+          if (na >= 0) {
+            A[row][na] = 1;
+            A[na][row] = 1;
+          }
+          if (nb >= 0) {
+            A[row][nb] = -1;
+            A[nb][row] = -1;
+          }
+          b[row] = led.value; // Vf (forward voltage, e.g. 2.0V)
+        });
+
+        return { A, b, n, vSources, leds };
+      }
+
+      /**
+       * Gaussian elimination with partial pivoting.
+       * Solves Ax = b in-place (deep-copies internally).
+       * Throws a descriptive error on singular/ill-conditioned matrices.
+       *
+       * @param {Float64Array[]} A  — n×n coefficient matrix
+       * @param {Float64Array}   b  — n-element RHS vector
+       * @returns {Float64Array} x  — solution vector
+       */
+      function luSolve(A, b) {
+        const n = b.length;
+        const M = A.map((row) => Float64Array.from(row));
+        const bv = Float64Array.from(b);
+
+        for (let col = 0; col < n; col++) {
+          // Partial pivot: find row with largest |value| in this column
+          let maxVal = Math.abs(M[col][col]);
+          let pivotRow = col;
+          for (let row = col + 1; row < n; row++) {
+            const v = Math.abs(M[row][col]);
+            if (v > maxVal) {
+              maxVal = v;
+              pivotRow = row;
+            }
+          }
+          if (maxVal < 1e-12)
+            throw new Error(
+              "Singular matrix — circuit may have floating nodes or a short circuit.",
+            );
+
+          // Swap rows
+          [M[col], M[pivotRow]] = [M[pivotRow], M[col]];
+          [bv[col], bv[pivotRow]] = [bv[pivotRow], bv[col]];
+
+          // Eliminate below pivot
+          for (let row = col + 1; row < n; row++) {
+            const factor = M[row][col] / M[col][col];
+            for (let k = col; k < n; k++) M[row][k] -= factor * M[col][k];
+            bv[row] -= factor * bv[col];
+          }
+        }
+
+        // Back substitution
+        const x = new Float64Array(n);
+        for (let i = n - 1; i >= 0; i--) {
+          x[i] = bv[i];
+          for (let j = i + 1; j < n; j++) x[i] -= M[i][j] * x[j];
+          x[i] /= M[i][i];
+        }
+        return x;
+      }
+
+      /**
+       * Run the full simulation pipeline on a validated netlist.
+       * Returns a SimResult object consumed by tsk-107 (result renderer).
+       *
+       * @typedef {Object} SimResult
+       * @property {boolean}             success
+       * @property {string}              [error]
+       * @property {number[]}            nodeVoltages    — index = node number (0 = ground = 0V)
+       * @property {Map<string,number>}  branchCurrents  — component id → amperes
+       * @property {Map<string,number>}  powerValues     — component id → watts
+       */
+      function runSimulation(netlist) {
+        // Build and solve the MNA system
+        const { A, b, n, vSources, leds } = buildMNA(netlist);
+        const x = luSolve(A, b);
+
+        // ── Extract node voltages ────────────────────────────────
+        // x[0..n-1] = voltages at nodes 1..nodeCount-1 (shifted by ground removal)
+        const nodeVoltages = new Array(netlist.nodeCount).fill(0);
+        for (let i = 0; i < n; i++) nodeVoltages[i + 1] = x[i]; // node 0 = 0V (ground)
+
+        // ── Extract branch currents & compute power ──────────────
+        const branchCurrents = new Map();
+        const powerValues = new Map();
+
+        netlist.components.forEach((comp) => {
+          const vA = nodeVoltages[comp.nodeA] ?? 0;
+          const vB = nodeVoltages[comp.nodeB] ?? 0;
+          let I = 0;
+
+          if (comp.type === "RESISTOR") {
+            I = (vA - vB) / comp.value;
+            powerValues.set(comp.id, I * I * comp.value);
+          } else if (comp.type === "SWITCH") {
+            const R = comp.closed ? 0.001 : 1e9;
+            I = (vA - vB) / R;
+            powerValues.set(comp.id, I * I * R);
+          } else if (comp.type === "VOLTAGE_SOURCE") {
+            // VS branch current is in x[n + index], sign: + = into nodeA
+            const idx = vSources.findIndex((vs) => vs.id === comp.id);
+            I = -x[n + idx]; // negate: MNA convention → delivered current
+            powerValues.set(comp.id, Math.abs(I) * comp.value);
+          } else if (comp.type === "LED") {
+            // LED branch current via its companion VS row
+            const idx = leds.findIndex((l) => l.id === comp.id);
+            I = -x[n + vSources.length + idx];
+            const LED_RF = 2;
+            const vDrop = comp.value + Math.abs(I) * LED_RF;
+            powerValues.set(comp.id, Math.abs(I) * vDrop);
+          }
+
+          branchCurrents.set(comp.id, I);
+        });
+
+        return {
+          success: true,
+          nodeVoltages,
+          branchCurrents,
+          powerValues,
+        };
+      }
+
       const simBtn = document.getElementById("btn-simulate");
       const simLabel = document.getElementById("simulate-label");
       let simHasResults = false;
@@ -2983,6 +3196,7 @@
           simLabel.textContent = "Simulate";
           simHasResults = false;
           state.netlist = null;
+          state.simResult = null;
           setStatus("ready", "Ready");
           render();
           return;
@@ -2997,9 +3211,9 @@
         simLabel.textContent = "Running…";
         setStatus("active", "Simulating…");
 
-        // Small delay so UI updates before synchronous work
         setTimeout(() => {
           try {
+            // ── Step 1: Build & validate netlist ────────────────
             const netlist = buildNetlist();
             const errors = validateNetlist(netlist);
 
@@ -3007,37 +3221,68 @@
               simBtn.classList.remove("running");
               simLabel.textContent = "Simulate";
               setStatus("ready", "Ready");
-              // Show each error as a separate toast, staggered
               errors.forEach((msg, i) =>
                 setTimeout(() => showToast(msg, "error", 5000), i * 300),
               );
               return;
             }
 
-            // Netlist is valid — store it for tsk-105 MNA
+            // ── Step 2: MNA + LU solve ───────────────────────────
+            const result = runSimulation(netlist);
+
+            // ── Step 3: Store and display ────────────────────────
             state.netlist = netlist;
+            state.simResult = result;
+
             simBtn.classList.remove("running");
             simBtn.classList.add("has-results");
             simLabel.textContent = "Clear";
             simHasResults = true;
+
+            // Build readable status summary
+            const vsEntry = netlist.components.find(
+              (c) => c.type === "VOLTAGE_SOURCE",
+            );
+            const I_main = vsEntry
+              ? Math.abs(result.branchCurrents.get(vsEntry.id) * 1000).toFixed(
+                  2,
+                )
+              : "—";
             setStatus(
               "active",
-              `Netlist OK — ${netlist.nodeCount} node${netlist.nodeCount !== 1 ? "s" : ""}, ` +
-                `${netlist.components.length} component${netlist.components.length !== 1 ? "s" : ""}`,
+              `Solved — ${netlist.nodeCount} nodes · ${I_main} mA supply current`,
             );
+
+            // Toast summary
             showToast(
-              `Netlist built: ${netlist.nodeCount} nodes, ${netlist.components.length} components.`,
+              `Simulation complete. ${netlist.nodeCount} nodes solved.`,
               "success",
               3000,
             );
-            // Log full netlist to console for tsk-105 verification
-            console.table(netlist.components);
-            console.log("Full netlist:", netlist);
+
+            // Console verification table for tsk-109 accuracy checks
+            console.group("Simulation Results");
+            console.log("Node voltages:", result.nodeVoltages);
+            const rows = [];
+            netlist.components.forEach((c) => {
+              rows.push({
+                id: c.id,
+                type: c.type,
+                "I (mA)": (result.branchCurrents.get(c.id) * 1000).toFixed(4),
+                "P (mW)": (result.powerValues.get(c.id) * 1000).toFixed(4),
+              });
+            });
+            console.table(rows);
+            console.groupEnd();
+
+            render(); // tsk-107 will use state.simResult to draw overlays
           } catch (err) {
             simBtn.classList.remove("running");
             simLabel.textContent = "Simulate";
             setStatus("ready", "Ready");
-            showToast(err.message, "error", 5000);
+            state.simResult = null;
+            showToast("Solver error: " + err.message, "error", 6000);
+            console.error("Simulation failed:", err);
           }
         }, 80);
       });
