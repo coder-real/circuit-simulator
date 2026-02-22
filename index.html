@@ -1853,10 +1853,17 @@
         }
         state.components.forEach((c) => {
           const f = DRAW_FN[c.type];
-          if (f) f(ctx, c, state.zoom);
+          if (!f) return;
+          // Pass branch current to LED so it glows when conducting
+          const current = state.simResult
+            ? (state.simResult.branchCurrents.get(c.id) ?? 0)
+            : 0;
+          f(ctx, c, state.zoom, current);
         });
         // tsk-104: draw ground symbol on the designated terminal
         if (state.groundTermId) drawGroundSymbol(ctx);
+        // tsk-107: draw simulation result overlays
+        if (state.simResult && state.netlist) drawSimResults(ctx);
       }
 
       // ── Module 8: Wire Drawing (tsk-103) ─────────────────────
@@ -2976,6 +2983,217 @@
         setMode("select");
       });
 
+      // ── Module 14: Result Rendering (tsk-107) ────────────────
+
+      /** Format a voltage value for display: "10.0 V", "-3.33 V" */
+      function fmtV(v) {
+        const abs = Math.abs(v);
+        if (abs >= 100) return v.toFixed(1) + " V";
+        if (abs >= 10) return v.toFixed(2) + " V";
+        return v.toFixed(3) + " V";
+      }
+
+      /** Format a current value for display: "10.0 mA", "1.23 A" */
+      function fmtI(amps) {
+        const abs = Math.abs(amps);
+        if (abs === 0) return "0 mA";
+        if (abs >= 1) return amps.toFixed(3) + " A";
+        const mA = amps * 1000;
+        if (Math.abs(mA) >= 100) return mA.toFixed(1) + " mA";
+        if (Math.abs(mA) >= 10) return mA.toFixed(2) + " mA";
+        return mA.toFixed(3) + " mA";
+      }
+
+      /** Format power: "100 mW", "1.20 W" */
+      function fmtP(watts) {
+        const abs = Math.abs(watts);
+        if (abs >= 1) return watts.toFixed(3) + " W";
+        return (watts * 1000).toFixed(1) + " mW";
+      }
+
+      /**
+       * Draw a rounded-rect badge at (cx, cy) in canvas pixels.
+       * color: background fill; textColor: label color.
+       */
+      function drawBadge(ctx, text, cx, cy, bgColor, textColor) {
+        const zoom = state.zoom;
+        const fontSize = Math.max(9, 11 * zoom);
+        ctx.font = `bold ${fontSize}px JetBrains Mono, monospace`;
+        const pad = 5 * zoom;
+        const h = fontSize + pad * 2;
+        const w = ctx.measureText(text).width + pad * 2;
+        const r = 4 * zoom;
+
+        ctx.save();
+        // Shadow for legibility over busy canvas
+        ctx.shadowColor = "rgba(0,0,0,0.6)";
+        ctx.shadowBlur = 4;
+
+        ctx.fillStyle = bgColor;
+        ctx.beginPath();
+        ctx.roundRect(cx - w / 2, cy - h / 2, w, h, r);
+        ctx.fill();
+        ctx.shadowBlur = 0;
+
+        ctx.fillStyle = textColor;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(text, cx, cy);
+        ctx.restore();
+      }
+
+      /**
+       * Draw a current arrow along a wire segment.
+       * dir > 0 → arrow points toward toTerm; < 0 → toward fromTerm.
+       */
+      function drawCurrentArrow(ctx, x1, y1, x2, y2, dir) {
+        const zoom = state.zoom;
+        const mx = (x1 + x2) / 2;
+        const my = (y1 + y2) / 2;
+        const angle = Math.atan2(y2 - y1, x2 - x1) + (dir < 0 ? Math.PI : 0);
+        const sz = 7 * zoom;
+
+        ctx.save();
+        ctx.translate(mx, my);
+        ctx.rotate(angle);
+        ctx.fillStyle = "rgba(255,255,255,0.85)";
+        ctx.beginPath();
+        ctx.moveTo(sz, 0);
+        ctx.lineTo(-sz * 0.6, -sz * 0.5);
+        ctx.lineTo(-sz * 0.6, sz * 0.5);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+      }
+
+      /**
+       * Main result overlay — called as a second pass after all components/wires.
+       * Draws:
+       *   • Voltage badge at each non-ground node (positioned near its terminals)
+       *   • Current + power badge on each component
+       *   • Current direction arrow on each wire's longest segment
+       *   • LED glow (handled by drawLED receiving current, not here)
+       */
+      function drawSimResults(ctx) {
+        const result = state.simResult;
+        const netlist = state.netlist;
+        if (!result || !netlist) return;
+
+        // ── 1. Node voltage badges ───────────────────────────────
+        // Group terminals by node number, compute centroid canvas position
+        const nodePos = new Map(); // node → { x, y, count }
+        state.components.forEach((comp) => {
+          comp.terminals.forEach((t) => {
+            if (t.node === null || t.node === 0) return; // skip ground node
+            const cp = termCanvasPos(comp, t);
+            if (!nodePos.has(t.node)) {
+              nodePos.set(t.node, { x: cp.x, y: cp.y, count: 1 });
+            } else {
+              const p = nodePos.get(t.node);
+              p.x += cp.x;
+              p.y += cp.y;
+              p.count++;
+            }
+          });
+        });
+
+        nodePos.forEach((pos, node) => {
+          const cx = pos.x / pos.count;
+          const cy = pos.y / pos.count - 22 * state.zoom; // offset above terminal
+          const v = result.nodeVoltages[node] ?? 0;
+          drawBadge(ctx, fmtV(v), cx, cy, "#FBBF24", "#0F172A");
+        });
+
+        // ── 2. Component current + power badges ──────────────────
+        netlist.components.forEach((nc) => {
+          const comp = state.components.find((c) => c.id === nc.id);
+          if (!comp) return;
+
+          const I = result.branchCurrents.get(nc.id) ?? 0;
+          const P = result.powerValues.get(nc.id) ?? 0;
+          const center = toCanvas(comp.x, comp.y);
+
+          // Place badge below component label (offset downward)
+          const badgeY = center.y + 44 * state.zoom;
+          const iText = fmtI(I);
+          const pText = fmtP(P);
+
+          // Current badge: blue-ish
+          drawBadge(
+            ctx,
+            iText,
+            center.x,
+            badgeY,
+            "rgba(30,58,138,0.92)",
+            "#93C5FD",
+          );
+          // Power badge: slightly below current badge
+          drawBadge(
+            ctx,
+            pText,
+            center.x,
+            badgeY + 18 * state.zoom,
+            "rgba(20,83,45,0.92)",
+            "#86EFAC",
+          );
+        });
+
+        // ── 3. Current arrows on wires ───────────────────────────
+        state.wires.forEach((wire) => {
+          // Find the component this wire's fromTermId belongs to
+          let fromComp = null;
+          let fromTerm = null;
+          for (const c of state.components) {
+            const t = c.terminals.find((t) => t.id === wire.fromTermId);
+            if (t) {
+              fromComp = c;
+              fromTerm = t;
+              break;
+            }
+          }
+          if (!fromComp) return;
+
+          // Find the netlist component for current direction
+          // Current flows from higher-voltage node to lower-voltage node
+          const nc = netlist.components.find((nc) => nc.id === fromComp.id);
+          if (!nc) return;
+
+          const I = result.branchCurrents.get(fromComp.id) ?? 0;
+          if (Math.abs(I) < 1e-6) return; // no meaningful current
+
+          // Find the longest segment in the wire to draw the arrow on
+          const pts = wire.waypoints;
+          let bestLen = 0,
+            bestIdx = 0;
+          for (let i = 0; i < pts.length - 2; i += 2) {
+            const dx = pts[i + 2] - pts[i];
+            const dy = pts[i + 3] - pts[i + 1];
+            const len = Math.hypot(dx, dy);
+            if (len > bestLen) {
+              bestLen = len;
+              bestIdx = i;
+            }
+          }
+          if (bestLen < 0.5) return; // degenerate wire
+
+          const p1 = toCanvas(pts[bestIdx], pts[bestIdx + 1]);
+          const p2 = toCanvas(pts[bestIdx + 2], pts[bestIdx + 3]);
+
+          // Arrow direction: positive I flows from terminal A to terminal B
+          // fromTerm.label tells us if this is the A or B end
+          const dir =
+            I > 0
+              ? fromTerm.label === "A"
+                ? 1
+                : -1
+              : fromTerm.label === "A"
+                ? -1
+                : 1;
+
+          drawCurrentArrow(ctx, p1.x, p1.y, p2.x, p2.y, dir);
+        });
+      }
+
       // ── Module 13: MNA Matrix Builder & LU Solver (tsk-105/106) ─
 
       /**
@@ -3345,6 +3563,24 @@
       }
 
       // ── Init ──────────────────────────────────────────────────
+      // Polyfill ctx.roundRect for any browser that lacks it (pre-2022)
+      if (!CanvasRenderingContext2D.prototype.roundRect) {
+        CanvasRenderingContext2D.prototype.roundRect = function (
+          x,
+          y,
+          w,
+          h,
+          r,
+        ) {
+          r = Math.min(r, w / 2, h / 2);
+          this.moveTo(x + r, y);
+          this.arcTo(x + w, y, x + w, y + h, r);
+          this.arcTo(x + w, y + h, x, y + h, r);
+          this.arcTo(x, y + h, x, y, r);
+          this.arcTo(x, y, x + w, y, r);
+          this.closePath();
+        };
+      }
       resizeCanvas();
       setMode("select");
       showToast("Drag a component onto the canvas to begin.", "success", 4000);
